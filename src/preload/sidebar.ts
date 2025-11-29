@@ -52,6 +52,43 @@ const sidebarAPI = {
 
   // Tab information
   getActiveTabInfo: () => electronAPI.ipcRenderer.invoke("get-active-tab-info"),
+
+  // Agent functionality
+  onAgentReasoningUpdate: (callback: (update: any) => void) => {
+    electronAPI.ipcRenderer.on("agent-reasoning-update", (_, update) => callback(update));
+  },
+
+  onAgentConfirmationRequest: (callback: (request: any) => void) => {
+    electronAPI.ipcRenderer.on("agent-confirmation-request", (_, request) => callback(request));
+  },
+
+  sendAgentConfirmationResponse: (data: { id: string; confirmed: boolean }) => {
+    electronAPI.ipcRenderer.send("agent-confirmation-response", data);
+  },
+
+  removeAgentReasoningListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-reasoning-update");
+  },
+
+  removeAgentConfirmationListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-confirmation-request");
+  },
+
+  onAgentActionPlan: (callback: (plan: any) => void) => {
+    electronAPI.ipcRenderer.on("agent-action-plan", (_, plan) => callback(plan));
+  },
+
+  onAgentCurrentStep: (callback: (step: number) => void) => {
+    electronAPI.ipcRenderer.on("agent-current-step", (_, step) => callback(step));
+  },
+
+  removeAgentActionPlanListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-action-plan");
+  },
+
+  removeAgentCurrentStepListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-current-step");
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -22,6 +22,9 @@ export class EventManager {
     // Dark mode events
     this.handleDarkModeEvents();
 
+    // Agent events
+    this.handleAgentEvents();
+
     // Debug events
     this.handleDebugEvents();
   }
@@ -215,6 +218,14 @@ export class EventManager {
     // Dark mode broadcasting
     ipcMain.on("dark-mode-changed", (event, isDarkMode) => {
       this.broadcastDarkMode(event.sender, isDarkMode);
+    });
+  }
+
+  private handleAgentEvents(): void {
+    // Agent confirmation response
+    ipcMain.on("agent-confirmation-response", (_event, data: { id: string; confirmed: boolean }) => {
+      // Forward to sidebar webContents
+      this.mainWindow.sidebar.view.webContents.send("agent-confirmation-response", data);
     });
   }
 

@@ -2,15 +2,48 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 
 interface Message {
     id: string
-    role: 'user' | 'assistant'
+    role: 'user' | 'assistant' | 'reasoning'
     content: string
     timestamp: number
     isStreaming?: boolean
 }
 
+interface ReasoningUpdate {
+    type: 'planning' | 'executing' | 'completed' | 'error'
+    content: string
+    stepNumber?: number
+    toolName?: string
+}
+
+interface ConfirmationRequest {
+    id: string
+    step: {
+        stepNumber: number
+        tool: string
+        parameters: Record<string, any>
+        reasoning: string
+        requiresConfirmation: boolean
+    }
+}
+
+interface ActionPlan {
+    goal: string
+    steps: Array<{
+        stepNumber: number
+        tool: string
+        parameters: Record<string, any>
+        reasoning: string
+        requiresConfirmation: boolean
+    }>
+}
+
 interface ChatContextType {
     messages: Message[]
     isLoading: boolean
+    reasoning: ReasoningUpdate[]
+    confirmationRequest: ConfirmationRequest | null
+    actionPlan: ActionPlan | null
+    currentStep: number | null
 
     // Chat actions
     sendMessage: (content: string) => Promise<void>
@@ -20,6 +53,9 @@ interface ChatContextType {
     getPageContent: () => Promise<string | null>
     getPageText: () => Promise<string | null>
     getCurrentUrl: () => Promise<string | null>
+
+    // Agent actions
+    handleConfirmation: (id: string, confirmed: boolean) => void
 }
 
 const ChatContext = createContext<ChatContextType | null>(null)
@@ -35,6 +71,10 @@ export const useChat = () => {
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [messages, setMessages] = useState<Message[]>([])
     const [isLoading, setIsLoading] = useState(false)
+    const [reasoning, setReasoning] = useState<ReasoningUpdate[]>([])
+    const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null)
+    const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null)
+    const [currentStep, setCurrentStep] = useState<number | null>(null)
 
     // Load initial messages from main process
     useEffect(() => {
@@ -63,6 +103,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const sendMessage = useCallback(async (content: string) => {
         setIsLoading(true)
+        // Clear previous reasoning and plan when starting a new request
+        setReasoning([])
+        setActionPlan(null)
+        setCurrentStep(null)
 
         try {
             const messageId = Date.now().toString()
@@ -85,6 +129,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await window.sidebarAPI.clearChat()
             setMessages([])
+            setReasoning([])
+            setConfirmationRequest(null)
+            setActionPlan(null)
+            setCurrentStep(null)
         } catch (error) {
             console.error('Failed to clear chat:', error)
         }
@@ -117,6 +165,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     }, [])
 
+    const handleConfirmation = useCallback((id: string, confirmed: boolean) => {
+        window.sidebarAPI.sendAgentConfirmationResponse({ id, confirmed })
+        setConfirmationRequest(null)
+    }, [])
+
     // Set up message listeners
     useEffect(() => {
         // Listen for streaming response updates
@@ -141,23 +194,75 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setMessages(convertedMessages)
         }
 
+        // Listen for agent reasoning updates
+        const handleReasoningUpdate = (update: ReasoningUpdate) => {
+            setReasoning((prev) => {
+                const updated = [...prev, update]
+                
+                // Extract action plan from planning updates
+                if (update.type === 'planning' && update.content.includes('Created plan')) {
+                    // Try to extract plan info from the reasoning
+                    // The plan details will come from the agent, but for now we track step numbers
+                }
+                
+                // Track current step from executing updates
+                if (update.type === 'executing' && update.stepNumber) {
+                    setCurrentStep(update.stepNumber)
+                }
+                
+                return updated
+            })
+        }
+
+        // Listen for agent confirmation requests
+        const handleConfirmationRequest = (request: ConfirmationRequest) => {
+            setConfirmationRequest(request)
+            // Update current step from confirmation request
+            if (request.step) {
+                setCurrentStep(request.step.stepNumber)
+            }
+        }
+
+        // Listen for action plan updates
+        const handleActionPlan = (plan: ActionPlan) => {
+            setActionPlan(plan)
+        }
+
+        // Listen for current step updates
+        const handleCurrentStep = (step: number) => {
+            setCurrentStep(step)
+        }
+
         window.sidebarAPI.onChatResponse(handleChatResponse)
         window.sidebarAPI.onMessagesUpdated(handleMessagesUpdated)
+        window.sidebarAPI.onAgentReasoningUpdate(handleReasoningUpdate)
+        window.sidebarAPI.onAgentConfirmationRequest(handleConfirmationRequest)
+        window.sidebarAPI.onAgentActionPlan(handleActionPlan)
+        window.sidebarAPI.onAgentCurrentStep(handleCurrentStep)
 
         return () => {
             window.sidebarAPI.removeChatResponseListener()
             window.sidebarAPI.removeMessagesUpdatedListener()
+            window.sidebarAPI.removeAgentReasoningListener()
+            window.sidebarAPI.removeAgentConfirmationListener()
+            window.sidebarAPI.removeAgentActionPlanListener()
+            window.sidebarAPI.removeAgentCurrentStepListener()
         }
     }, [])
 
     const value: ChatContextType = {
         messages,
         isLoading,
+        reasoning,
+        confirmationRequest,
+        actionPlan,
+        currentStep,
         sendMessage,
         clearChat,
         getPageContent,
         getPageText,
-        getCurrentUrl
+        getCurrentUrl,
+        handleConfirmation
     }
 
     return (

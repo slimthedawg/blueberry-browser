@@ -2,14 +2,17 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Square, Sparkles, Plus } from 'lucide-react'
+import { ArrowUp, Plus } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
+import { ReasoningStep } from './ReasoningStep'
+import { ConfirmationDialog } from './ConfirmationDialog'
+import { ActionPlan } from './ActionPlan'
 
 interface Message {
     id: string
-    role: 'user' | 'assistant'
+    role: 'user' | 'assistant' | 'reasoning'
     content: string
     timestamp: number
     isStreaming?: boolean
@@ -59,6 +62,7 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
             }, 10)
             return () => clearTimeout(timer)
         }
+        return undefined
     }, [content, currentIndex])
 
     return (
@@ -117,12 +121,43 @@ const Markdown: React.FC<{ content: string }> = ({ content }) => (
 )
 
 // Assistant Message Component - appears on the left
-const AssistantMessage: React.FC<{ content: string; isStreaming?: boolean }> = ({
+const AssistantMessage: React.FC<{ 
+    content: string; 
+    isStreaming?: boolean; 
+    reasoning?: any[];
+    actionPlan?: any;
+    currentStep?: number | null;
+}> = ({
     content,
-    isStreaming
+    isStreaming,
+    reasoning,
+    actionPlan,
+    currentStep
 }) => (
     <div className="relative w-full animate-fade-in">
         <div className="py-1">
+            {actionPlan && (
+                <div className="mb-3">
+                    <ActionPlan 
+                        steps={actionPlan.steps}
+                        currentStep={currentStep || undefined}
+                        goal={actionPlan.goal}
+                    />
+                </div>
+            )}
+            {reasoning && reasoning.length > 0 && (
+                <div className="mb-3 space-y-1">
+                    {reasoning.map((update, index) => (
+                        <ReasoningStep
+                            key={index}
+                            type={update.type}
+                            content={update.content}
+                            stepNumber={update.stepNumber}
+                            toolName={update.toolName}
+                        />
+                    ))}
+                </div>
+            )}
             {isStreaming ? (
                 <StreamingText content={content} />
             ) : (
@@ -244,13 +279,19 @@ interface ConversationTurn {
 const ConversationTurnComponent: React.FC<{
     turn: ConversationTurn
     isLoading?: boolean
-}> = ({ turn, isLoading }) => (
+    reasoning?: any[]
+    actionPlan?: any
+    currentStep?: number | null
+}> = ({ turn, isLoading, reasoning, actionPlan, currentStep }) => (
     <div className="pt-12 flex flex-col gap-8">
         {turn.user && <UserMessage content={turn.user.content} />}
         {turn.assistant && (
             <AssistantMessage
                 content={turn.assistant.content}
                 isStreaming={turn.assistant.isStreaming}
+                reasoning={reasoning}
+                actionPlan={actionPlan}
+                currentStep={currentStep}
             />
         )}
         {isLoading && (
@@ -263,7 +304,7 @@ const ConversationTurnComponent: React.FC<{
 
 // Main Chat Component
 export const Chat: React.FC = () => {
-    const { messages, isLoading, sendMessage, clearChat } = useChat()
+    const { messages, isLoading, sendMessage, clearChat, reasoning, confirmationRequest, handleConfirmation, actionPlan, currentStep } = useChat()
     const scrollRef = useAutoScroll(messages)
 
     // Group messages into conversation turns
@@ -329,6 +370,9 @@ export const Chat: React.FC = () => {
                                         showLoadingAfterLastTurn &&
                                         index === conversationTurns.length - 1
                                     }
+                                    reasoning={index === conversationTurns.length - 1 ? reasoning : undefined}
+                                    actionPlan={index === conversationTurns.length - 1 ? actionPlan : undefined}
+                                    currentStep={index === conversationTurns.length - 1 ? currentStep : undefined}
                                 />
                             ))}
                         </>
@@ -343,6 +387,14 @@ export const Chat: React.FC = () => {
             <div className="p-4">
                 <ChatInput onSend={sendMessage} disabled={isLoading} />
             </div>
+
+            {/* Confirmation Dialog */}
+            {confirmationRequest && (
+                <ConfirmationDialog
+                    request={confirmationRequest}
+                    onConfirm={handleConfirmation}
+                />
+            )}
         </div>
     )
 }

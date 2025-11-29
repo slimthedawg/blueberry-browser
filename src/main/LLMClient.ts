@@ -5,6 +5,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import * as dotenv from "dotenv";
 import { join } from "path";
 import type { Window } from "./Window";
+import { AgentOrchestrator } from "./AgentOrchestrator";
 
 // Load environment variables from .env file
 dotenv.config({ path: join(__dirname, "../../.env") });
@@ -36,6 +37,8 @@ export class LLMClient {
   private readonly modelName: string;
   private readonly model: LanguageModel | null;
   private messages: CoreMessage[] = [];
+  private agentOrchestrator: AgentOrchestrator | null = null;
+  private agentMode: boolean = false;
 
   constructor(webContents: WebContents) {
     this.webContents = webContents;
@@ -49,6 +52,20 @@ export class LLMClient {
   // Set the window reference after construction to avoid circular dependencies
   setWindow(window: Window): void {
     this.window = window;
+    // Initialize agent orchestrator when window is available
+    if (!this.agentOrchestrator) {
+      this.agentOrchestrator = new AgentOrchestrator(this.webContents, window, (msg: CoreMessage) => {
+        // Callback to add assistant messages to our messages array
+        this.messages.push(msg);
+        this.sendMessagesToRenderer();
+      });
+    }
+    // Enable agent mode by default
+    this.agentMode = true;
+  }
+
+  setAgentMode(enabled: boolean): void {
+    this.agentMode = enabled;
   }
 
   private getProvider(): LLMProvider {
@@ -103,6 +120,22 @@ export class LLMClient {
 
   async sendChatMessage(request: ChatRequest): Promise<void> {
     try {
+      // Add user message to conversation history (for both modes)
+      const userMessage: CoreMessage = {
+        role: "user",
+        content: request.message,
+      };
+      this.messages.push(userMessage);
+      this.sendMessagesToRenderer();
+
+      // Check if agent mode is enabled
+      if (this.agentMode && this.agentOrchestrator) {
+        // Use agent orchestrator for agent mode
+        await this.agentOrchestrator.processRequest(request.message, request.messageId);
+        return;
+      }
+
+      // Regular chat mode (existing behavior)
       // Get screenshot from active tab if available
       let screenshot: string | null = null;
       if (this.window) {
@@ -134,16 +167,16 @@ export class LLMClient {
         text: request.message,
       });
 
-      // Create user message in CoreMessage format
-      const userMessage: CoreMessage = {
-        role: "user",
-        content: userContent.length === 1 ? request.message : userContent,
-      };
-      
-      this.messages.push(userMessage);
-
-      // Send updated messages to renderer
-      this.sendMessagesToRenderer();
+      // Create user message in CoreMessage format (already added above in agent mode check)
+      if (!this.agentMode) {
+        const userMessage: CoreMessage = {
+          role: "user",
+          content: userContent.length === 1 ? request.message : userContent,
+        };
+        
+        this.messages.push(userMessage);
+        this.sendMessagesToRenderer();
+      }
 
       if (!this.model) {
         this.sendErrorMessage(

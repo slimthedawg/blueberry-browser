@@ -1,0 +1,71 @@
+{
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "click_element",
+      "category": "browser",
+      "description": "Click an element on the current page using CSS selector, XPath, or text content"
+    },
+    {
+      "name": "navigate_to_url",
+      "category": "browser",
+      "description": "Navigate to a URL in the current tab or a new tab"
+    },
+    {
+      "name": "fill_form",
+      "category": "browser",
+      "description": "Fill form fields on the current page"
+    },
+    {
+      "name": "submit_form",
+      "category": "browser",
+      "description": "Submit a form on the current page"
+    },
+    {
+      "name": "read_page_content",
+      "category": "browser",
+      "description": "Read the text content or HTML of the current page"
+    },
+    {
+      "name": "create_tab",
+      "category": "browser",
+      "description": "Create a new browser tab"
+    },
+    {
+      "name": "switch_tab",
+      "category": "browser",
+      "description": "Switch to a different browser tab"
+    },
+    {
+      "name": "close_tab",
+      "category": "browser",
+      "description": "Close a browser tab"
+    },
+    {
+      "name": "read_file",
+      "category": "filesystem",
+      "description": "Read the contents of a file"
+    },
+    {
+      "name": "write_file",
+      "category": "filesystem",
+      "description": "Write content to a file (creates file if it doesn't exist, overwrites if it does)"
+    },
+    {
+      "name": "list_directory",
+      "category": "filesystem",
+      "description": "List files and directories in a given path"
+    },
+    {
+      "name": "google_search",
+      "category": "search",
+      "description": "Perform a Google search and return results"
+    },
+    {
+      "name": "execute_python",
+      "category": "code",
+      "description": "Execute simple Python code in a sandboxed environment"
+    }
+  ]
+}
+
