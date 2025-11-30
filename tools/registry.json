@@ -27,6 +27,11 @@
       "description": "Read the text content or HTML of the current page"
     },
     {
+      "name": "analyze_page_structure",
+      "category": "browser",
+      "description": "Analyze the page structure to find all interactive elements (inputs, buttons, selects, links) with their semantic context. Use this BEFORE filling forms or clicking buttons to understand what elements are available."
+    },
+    {
       "name": "create_tab",
       "category": "browser",
       "description": "Create a new browser tab"

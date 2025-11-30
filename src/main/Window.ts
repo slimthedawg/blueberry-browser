@@ -2,6 +2,7 @@ import { BaseWindow, shell } from "electron";
 import { Tab } from "./Tab";
 import { TopBar } from "./TopBar";
 import { SideBar } from "./SideBar";
+import { getBrowserStateManager } from "./BrowserStateManager";
 
 export class Window {
   private _baseWindow: BaseWindow;
@@ -105,6 +106,17 @@ export class Window {
       height: bounds.height - 88, // Subtract topbar height
     });
 
+    // Start tracking console logs for this tab
+    const stateManager = getBrowserStateManager();
+    stateManager.startTrackingConsole(tab.webContents, tabId);
+
+    // Track page state updates
+    tab.webContents.on("did-finish-load", () => {
+      const url = tab.webContents.getURL();
+      const title = tab.webContents.getTitle();
+      stateManager.updatePageState(tabId, url, title);
+    });
+
     // Store the tab
     this.tabsMap.set(tabId, tab);
 
@@ -124,6 +136,10 @@ export class Window {
     if (!tab) {
       return false;
     }
+
+    // Stop tracking and clear state for this tab
+    const stateManager = getBrowserStateManager();
+    stateManager.clearTabState(tabId);
 
     // Remove the WebContentsView from the window
     this._baseWindow.contentView.removeChildView(tab.view);

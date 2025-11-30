@@ -76,8 +76,8 @@ const TabItem: React.FC<TabItemProps> = ({
 export const TabBar: React.FC = () => {
     const { tabs, createTab, closeTab, switchTab } = useBrowser()
 
-    const handleCreateTab = () => {
-        createTab('https://www.google.com')
+    const handleCreateTab = async () => {
+        await createTab() // Create new tab with default URL
     }
 
     // Extract favicon from URL (simplified - you might want to improve this)
@@ -91,30 +91,39 @@ export const TabBar: React.FC = () => {
     }
 
     return (
-        <div className="flex-1 overflow-x-hidden flex items-center">
+        <div className="flex-1 overflow-x-hidden flex items-center h-full">
             {/* macOS traffic lights spacing */}
             <div className="pl-20" />
 
-            {/* Tabs */}
-            <div className="flex-1 overflow-x-auto flex">
-                {tabs.map(tab => (
-                    <TabItem
-                        key={tab.id}
-                        id={tab.id}
-                        title={tab.title}
-                        favicon={getFavicon(tab.url)}
-                        isActive={tab.isActive}
-                        onClose={() => closeTab(tab.id)}
-                        onActivate={() => switchTab(tab.id)}
-                    />
-                ))}
+            {/* Tabs Container - Scrollable */}
+            <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center gap-0.5 min-w-0 scrollbar-hide">
+                <div className="flex items-center gap-0.5 h-full">
+                    {tabs.length === 0 ? (
+                        <div className="text-xs text-muted-foreground px-3">
+                            No tabs open
+                        </div>
+                    ) : (
+                        tabs.map(tab => (
+                            <TabItem
+                                key={tab.id}
+                                id={tab.id}
+                                title={tab.title}
+                                favicon={getFavicon(tab.url)}
+                                isActive={tab.isActive}
+                                onClose={() => closeTab(tab.id)}
+                                onActivate={() => switchTab(tab.id)}
+                            />
+                        ))
+                    )}
+                </div>
             </div>
 
-            {/* Add Tab Button */}
-            <div className="pl-1 pr-2">
+            {/* Add Tab Button - Always visible */}
+            <div className="flex-shrink-0 pl-1 pr-2">
                 <TabBarButton
                     Icon={Plus}
                     onClick={handleCreateTab}
+                    className="h-8 w-8"
                 />
             </div>
         </div>

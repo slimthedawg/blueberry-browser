@@ -21,14 +21,35 @@ export const submitForm: ToolDefinition = {
   ],
   async execute(params: Record<string, any>, context: ToolExecutionContext): Promise<ToolResult> {
     const { formSelector, tabId } = params;
-    const tab = tabId
-      ? context.window.getTab(tabId)
+    
+    // Convert tabId to string if it's a number (common mistake from LLM)
+    let tabIdString: string | undefined = undefined;
+    if (tabId !== undefined && tabId !== null) {
+      tabIdString = String(tabId);
+    }
+    
+    // Use tabId from params, context, or active tab
+    let targetTabId = tabIdString || context.activeTabId;
+    let tab = targetTabId
+      ? context.window.getTab(targetTabId)
       : context.window.activeTab;
+
+    // If tab not found, try active tab
+    if (!tab && context.window.activeTab) {
+      tab = context.window.activeTab;
+      targetTabId = context.window.activeTab.id;
+    }
+
+    // If still no tab, try to get any available tab
+    if (!tab && context.window.allTabs && context.window.allTabs.length > 0) {
+      tab = context.window.allTabs[0];
+      targetTabId = tab.id;
+    }
 
     if (!tab) {
       return {
         success: false,
-        error: "No active tab available",
+        error: "No active tab available. Please create a tab first or navigate to a page.",
       };
     }
 

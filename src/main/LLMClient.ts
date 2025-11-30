@@ -23,12 +23,13 @@ interface StreamChunk {
 type LLMProvider = "openai" | "anthropic";
 
 const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  openai: "gpt-4o-mini",
+  openai: "gpt-5-nano-2025-08-07",
   anthropic: "claude-3-5-sonnet-20241022",
 };
 
 const MAX_CONTEXT_LENGTH = 4000;
-const DEFAULT_TEMPERATURE = 0.7;
+// Temperature is not supported for reasoning models like gpt-5-nano-2025-08-07
+// const DEFAULT_TEMPERATURE = 0.7;
 
 export class LLMClient {
   private readonly webContents: WebContents;
@@ -102,6 +103,20 @@ export class LLMClient {
         return undefined;
     }
   }
+
+  // Temperature not supported for reasoning models like gpt-5-nano-2025-08-07
+  // private isReasoningModel(): boolean {
+  //   // Reasoning models don't support temperature parameter
+  //   const reasoningModelPatterns = [
+  //     /^o1/i,
+  //     /^o3/i,
+  //     /reasoning/i,
+  //     /^gpt-5/i, // gpt-5 models are reasoning models
+  //     /^gpt-4o-reasoning/i
+  //   ];
+  //   
+  //   return reasoningModelPatterns.some(pattern => pattern.test(this.modelName));
+  // }
 
   private logInitializationStatus(): void {
     if (this.model) {
@@ -272,13 +287,19 @@ export class LLMClient {
     }
 
     try {
-      const result = await streamText({
+      const streamOptions: any = {
         model: this.model,
         messages,
-        temperature: DEFAULT_TEMPERATURE,
         maxRetries: 3,
         abortSignal: undefined, // Could add abort controller for cancellation
-      });
+      };
+      
+      // Temperature not supported for reasoning models like gpt-5-nano-2025-08-07
+      // if (!this.isReasoningModel()) {
+      //   streamOptions.temperature = DEFAULT_TEMPERATURE;
+      // }
+      
+      const result = await streamText(streamOptions);
 
       await this.processStream(result.textStream, messageId);
     } catch (error) {

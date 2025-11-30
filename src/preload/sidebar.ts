@@ -89,6 +89,19 @@ const sidebarAPI = {
   removeAgentCurrentStepListener: () => {
     electronAPI.ipcRenderer.removeAllListeners("agent-current-step");
   },
+
+  // User guidance for element selection
+  onAgentGuidanceRequest: (callback: (request: any) => void) => {
+    electronAPI.ipcRenderer.on("agent-guidance-request", (_, request) => callback(request));
+  },
+
+  sendAgentGuidanceResponse: (data: { id: string; selector?: string; elementInfo?: any; cancelled?: boolean }) => {
+    electronAPI.ipcRenderer.send("agent-guidance-response", data);
+  },
+
+  removeAgentGuidanceListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-guidance-request");
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

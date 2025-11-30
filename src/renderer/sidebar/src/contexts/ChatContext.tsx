@@ -37,11 +37,19 @@ interface ActionPlan {
     }>
 }
 
+interface GuidanceRequest {
+    id: string
+    message: string
+    elementType: string
+    stepNumber: number
+}
+
 interface ChatContextType {
     messages: Message[]
     isLoading: boolean
     reasoning: ReasoningUpdate[]
     confirmationRequest: ConfirmationRequest | null
+    guidanceRequest: GuidanceRequest | null
     actionPlan: ActionPlan | null
     currentStep: number | null
 
@@ -56,6 +64,7 @@ interface ChatContextType {
 
     // Agent actions
     handleConfirmation: (id: string, confirmed: boolean) => void
+    handleGuidanceResponse: (id: string, selector?: string, elementInfo?: any, cancelled?: boolean) => void
 }
 
 const ChatContext = createContext<ChatContextType | null>(null)
@@ -73,6 +82,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isLoading, setIsLoading] = useState(false)
     const [reasoning, setReasoning] = useState<ReasoningUpdate[]>([])
     const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null)
+    const [guidanceRequest, setGuidanceRequest] = useState<GuidanceRequest | null>(null)
     const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null)
     const [currentStep, setCurrentStep] = useState<number | null>(null)
 
@@ -170,6 +180,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setConfirmationRequest(null)
     }, [])
 
+    const handleGuidanceResponse = useCallback((id: string, selector?: string, elementInfo?: any, cancelled?: boolean) => {
+        window.sidebarAPI.sendAgentGuidanceResponse({ id, selector, elementInfo, cancelled })
+        setGuidanceRequest(null)
+    }, [])
+
     // Set up message listeners
     useEffect(() => {
         // Listen for streaming response updates
@@ -194,9 +209,22 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setMessages(convertedMessages)
         }
 
-        // Listen for agent reasoning updates
+        // Listen for agent reasoning updates - render immediately
         const handleReasoningUpdate = (update: ReasoningUpdate) => {
+            // Use functional update to ensure we get the latest state
             setReasoning((prev) => {
+                // Check if this is a duplicate (same content and type)
+                const isDuplicate = prev.some(u => 
+                    u.type === update.type && 
+                    u.content === update.content && 
+                    u.stepNumber === update.stepNumber
+                );
+                
+                if (isDuplicate) {
+                    return prev; // Don't add duplicates
+                }
+                
+                // Add the new update immediately
                 const updated = [...prev, update]
                 
                 // Extract action plan from planning updates
@@ -233,12 +261,21 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setCurrentStep(step)
         }
 
+        // Listen for guidance requests
+        const handleGuidanceRequest = (request: GuidanceRequest) => {
+            setGuidanceRequest(request)
+            if (request.stepNumber) {
+                setCurrentStep(request.stepNumber)
+            }
+        }
+
         window.sidebarAPI.onChatResponse(handleChatResponse)
         window.sidebarAPI.onMessagesUpdated(handleMessagesUpdated)
         window.sidebarAPI.onAgentReasoningUpdate(handleReasoningUpdate)
         window.sidebarAPI.onAgentConfirmationRequest(handleConfirmationRequest)
         window.sidebarAPI.onAgentActionPlan(handleActionPlan)
         window.sidebarAPI.onAgentCurrentStep(handleCurrentStep)
+        window.sidebarAPI.onAgentGuidanceRequest(handleGuidanceRequest)
 
         return () => {
             window.sidebarAPI.removeChatResponseListener()
@@ -247,6 +284,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             window.sidebarAPI.removeAgentConfirmationListener()
             window.sidebarAPI.removeAgentActionPlanListener()
             window.sidebarAPI.removeAgentCurrentStepListener()
+            window.sidebarAPI.removeAgentGuidanceListener()
         }
     }, [])
 
@@ -255,6 +293,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         reasoning,
         confirmationRequest,
+        guidanceRequest,
         actionPlan,
         currentStep,
         sendMessage,
@@ -262,7 +301,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         getPageContent,
         getPageText,
         getCurrentUrl,
-        handleConfirmation
+        handleConfirmation,
+        handleGuidanceResponse
     }
 
     return (

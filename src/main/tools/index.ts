@@ -7,9 +7,12 @@ import { navigateToUrl } from "./implementations/browser/navigateToUrl";
 import { fillForm } from "./implementations/browser/fillForm";
 import { submitForm } from "./implementations/browser/submitForm";
 import { readPageContent } from "./implementations/browser/readPageContent";
+import { analyzePageStructure } from "./implementations/browser/analyzePageStructure";
 import { createTab } from "./implementations/browser/createTab";
 import { switchTab } from "./implementations/browser/switchTab";
 import { closeTab } from "./implementations/browser/closeTab";
+import { selectSuggestion } from "./implementations/browser/selectSuggestion";
+import { captureScreenshot } from "./implementations/browser/captureScreenshot";
 import { readFile } from "./implementations/filesystem/readFile";
 import { writeFile } from "./implementations/filesystem/writeFile";
 import { listDirectory } from "./implementations/filesystem/listDirectory";
@@ -27,9 +30,12 @@ export function createToolRegistry(): ToolRegistry {
     fillForm,
     submitForm,
     readPageContent,
+    analyzePageStructure,
     createTab,
     switchTab,
     closeTab,
+    selectSuggestion,
+    captureScreenshot,
     // Filesystem tools
     readFile,
     writeFile,

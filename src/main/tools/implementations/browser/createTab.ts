@@ -18,6 +18,11 @@ export const createTab: ToolDefinition = {
 
     try {
       const tab = context.window.createTab(url || "https://www.google.com");
+      // Switch to the new tab immediately
+      context.window.switchActiveTab(tab.id);
+      // Wait a moment for the tab to start loading
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       return {
         success: true,
         result: {
@@ -25,7 +30,7 @@ export const createTab: ToolDefinition = {
           url: tab.url,
           title: tab.title,
         },
-        message: `Created new tab: ${tab.title}`,
+        message: `Created new tab: ${tab.title} and switched to it`,
       };
     } catch (error) {
       return {

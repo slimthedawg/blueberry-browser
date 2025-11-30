@@ -8,6 +8,7 @@ import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
 import { ReasoningStep } from './ReasoningStep'
 import { ConfirmationDialog } from './ConfirmationDialog'
+import { ElementGuidanceDialog } from './ElementGuidanceDialog'
 import { ActionPlan } from './ActionPlan'
 
 interface Message {
@@ -304,7 +305,7 @@ const ConversationTurnComponent: React.FC<{
 
 // Main Chat Component
 export const Chat: React.FC = () => {
-    const { messages, isLoading, sendMessage, clearChat, reasoning, confirmationRequest, handleConfirmation, actionPlan, currentStep } = useChat()
+    const { messages, isLoading, sendMessage, clearChat, reasoning, confirmationRequest, guidanceRequest, handleConfirmation, handleGuidanceResponse, actionPlan, currentStep } = useChat()
     const scrollRef = useAutoScroll(messages)
 
     // Group messages into conversation turns
@@ -393,6 +394,14 @@ export const Chat: React.FC = () => {
                 <ConfirmationDialog
                     request={confirmationRequest}
                     onConfirm={handleConfirmation}
+                />
+            )}
+
+            {/* Element Guidance Dialog */}
+            {guidanceRequest && (
+                <ElementGuidanceDialog
+                    request={guidanceRequest}
+                    onResponse={handleGuidanceResponse}
                 />
             )}
         </div>

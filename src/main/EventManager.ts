@@ -227,6 +227,28 @@ export class EventManager {
       // Forward to sidebar webContents
       this.mainWindow.sidebar.view.webContents.send("agent-confirmation-response", data);
     });
+
+    // Agent user guidance request (element selection)
+    ipcMain.on("agent-guidance-request", (_event, data: { 
+      id: string; 
+      message: string; 
+      elementType: string;
+      stepNumber: number;
+    }) => {
+      // Forward to sidebar webContents
+      this.mainWindow.sidebar.view.webContents.send("agent-guidance-request", data);
+    });
+
+    // Agent user guidance response (element selected by user)
+    ipcMain.on("agent-guidance-response", (_event, data: { 
+      id: string; 
+      selector?: string;
+      elementInfo?: any;
+      cancelled?: boolean;
+    }) => {
+      // Forward to sidebar webContents
+      this.mainWindow.sidebar.view.webContents.send("agent-guidance-response", data);
+    });
   }
 
   private handleDebugEvents(): void {

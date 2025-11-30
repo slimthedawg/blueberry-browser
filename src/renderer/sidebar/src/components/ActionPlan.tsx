@@ -57,7 +57,7 @@ export const ActionPlan: React.FC<ActionPlanProps> = ({
                       {step.tool}
                     </span>
                     {step.requiresConfirmation && (
-                      <span className="text-xs text-yellow-500/70">⚠️</span>
+                      <span className="text-xs text-yellow-500/70">(requires confirmation)</span>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground">

@@ -62,13 +62,22 @@ interface SidebarAPI {
   // Agent functionality
   onAgentReasoningUpdate: (callback: (update: ReasoningUpdate) => void) => void;
   onAgentConfirmationRequest: (callback: (request: ConfirmationRequest) => void) => void;
+  onAgentActionPlan: (callback: (plan: ActionPlan) => void) => void;
+  onAgentCurrentStep: (callback: (step: number) => void) => void;
   sendAgentConfirmationResponse: (data: { id: string; confirmed: boolean }) => void;
   removeAgentReasoningListener: () => void;
   removeAgentConfirmationListener: () => void;
+  removeAgentActionPlanListener: () => void;
+  removeAgentCurrentStepListener: () => void;
   onAgentActionPlan: (callback: (plan: ActionPlan) => void) => void;
   onAgentCurrentStep: (callback: (step: number) => void) => void;
   removeAgentActionPlanListener: () => void;
   removeAgentCurrentStepListener: () => void;
+
+  // User guidance for element selection
+  onAgentGuidanceRequest: (callback: (request: any) => void) => void;
+  sendAgentGuidanceResponse: (data: { id: string; selector?: string; elementInfo?: any; cancelled?: boolean }) => void;
+  removeAgentGuidanceListener: () => void;
 }
 
 interface ActionPlan {

@@ -36,30 +36,44 @@ export const navigateToUrl: ToolDefinition = {
     }
 
     try {
-      let tab = tabId ? context.window.getTab(tabId) : null;
+      // Convert tabId to string if it's a number (common mistake from LLM)
+      let tabIdString: string | undefined = undefined;
+      if (tabId !== undefined && tabId !== null) {
+        tabIdString = String(tabId);
+      }
+      
+      let tab = tabIdString ? context.window.getTab(tabIdString) : null;
 
       if (newTab || !tab) {
         // Create new tab
         tab = context.window.createTab(url);
+        // Switch to the new tab immediately
+        context.window.switchActiveTab(tab.id);
+        // Wait a bit for the new tab to start loading
+        await new Promise(resolve => setTimeout(resolve, 1000));
         return {
           success: true,
           result: {
             tabId: tab.id,
             url: tab.url,
           },
-          message: `Opened ${url} in new tab`,
+          message: `Opened ${url} in new tab and switched to it`,
         };
       }
 
       // Navigate existing tab
       await tab.loadURL(url);
+      
+      // Wait for page to start loading
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       return {
         success: true,
         result: {
           tabId: tab.id,
           url: tab.url,
         },
-        message: `Navigated to ${url}`,
+        message: `Navigated to ${url}. Page is loading...`,
       };
     } catch (error) {
       return {
