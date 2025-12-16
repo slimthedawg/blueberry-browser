@@ -12,9 +12,10 @@ export const TabBarButton: React.FC<TabBarButtonProps> = ({ Icon, onClick, class
     return (
         <div
             className={cn(
-                "flex items-center justify-center h-8 w-10 rounded-md",
+                "flex items-center justify-center rounded-md",
                 "hover:bg-primary/10 active:bg-primary/20 app-region-no-drag",
                 "transition-colors duration-200 cursor-pointer",
+                "text-primary dark:text-primary",
                 className
             )}
             onClick={onClick}

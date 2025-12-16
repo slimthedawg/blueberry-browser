@@ -1,8 +1,13 @@
-import { BaseWindow, shell } from "electron";
+import { BaseWindow, shell, ipcMain, screen } from "electron";
 import { Tab } from "./Tab";
 import { TopBar } from "./TopBar";
 import { SideBar } from "./SideBar";
 import { getBrowserStateManager } from "./BrowserStateManager";
+import { getRecordingManager } from "./RecordingManager";
+import { EventManager } from "./EventManager";
+import { getDarkModeManager } from "./DarkModeManager";
+import { getWorkspaceManager } from "./WorkspaceManager";
+import { getWindowStateManager } from "./WindowStateManager";
 
 export class Window {
   private _baseWindow: BaseWindow;
@@ -13,27 +18,51 @@ export class Window {
   private _sideBar: SideBar;
 
   constructor() {
-    // Create the browser window.
+    // Get screen dimensions
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const screenWidth = primaryDisplay.workAreaSize.width;
+    const screenHeight = primaryDisplay.workAreaSize.height;
+
+    // Default window bounds (centered)
+    const defaultBounds = {
+      width: Math.min(1900, screenWidth - 100),
+      height: Math.min(1000, screenHeight - 100),
+      x: Math.floor((screenWidth - Math.min(1900, screenWidth - 100)) / 2),
+      y: Math.floor((screenHeight - Math.min(1000, screenHeight - 100)) / 2),
+    };
+
+    // Create the browser window with default bounds
     this._baseWindow = new BaseWindow({
-      width: 1000,
-      height: 800,
-      show: true,
+      ...defaultBounds,
+      show: false, // Don't show until we've loaded saved state
       autoHideMenuBar: false,
       titleBarStyle: "hidden",
-      ...(process.platform !== "darwin" ? { titleBarOverlay: true } : {}),
+      ...(process.platform !== "darwin" ? { 
+        titleBarOverlay: {
+          color: "#141414", // Match topbar background (dark mode default, will update on renderer load)
+          symbolColor: "#fafafa", // Match topbar foreground text color
+          height: 32, // Chrome-style: just enough for window controls at the top
+        } 
+      } : {}),
       trafficLightPosition: { x: 15, y: 13 },
     });
 
+    // Load and apply saved window state
+    this.loadAndApplyWindowState(screenWidth, screenHeight);
+
     this._baseWindow.setMinimumSize(1000, 800);
 
-    this._topBar = new TopBar(this._baseWindow);
+    // Create sidebar and tabs first (lower z-order)
     this._sideBar = new SideBar(this._baseWindow);
-
+    
     // Set the window reference on the LLM client to avoid circular dependency
     this._sideBar.client.setWindow(this);
 
     // Create the first tab
     this.createTab();
+
+    // Create topbar last so it's on top (for popups)
+    this._topBar = new TopBar(this._baseWindow);
 
     // Set up window resize handler
     this._baseWindow.on("resize", () => {
@@ -48,6 +77,13 @@ export class Window {
           height: bounds.height,
         });
       }
+      // Save window state on resize
+      this.saveWindowState();
+    });
+
+    // Save window state on move
+    this._baseWindow.on("moved", () => {
+      this.saveWindowState();
     });
 
     // Handle external link opening
@@ -59,14 +95,65 @@ export class Window {
     });
 
     this.setupEventListeners();
+    this.setupDarkModeListener();
+    
+    // Initialize dark mode manager
+    const darkModeManager = getDarkModeManager();
+    darkModeManager.setWindow(this);
+    darkModeManager.setupIpcHandlers();
+
+    // Ensure a default workspace exists for blueberry://home
+    const workspaceManager = getWorkspaceManager();
+    workspaceManager.ensureDefaultWorkspace().catch((err) =>
+      console.warn("Failed to ensure default workspace", err)
+    );
   }
 
   private setupEventListeners(): void {
     this._baseWindow.on("closed", () => {
+      // Save window state before closing
+      this.saveWindowState();
       // Clean up all tabs when window is closed
       this.tabsMap.forEach((tab) => tab.destroy());
       this.tabsMap.clear();
     });
+  }
+
+  private async loadAndApplyWindowState(screenWidth: number, screenHeight: number): Promise<void> {
+    try {
+      const windowStateManager = getWindowStateManager();
+      const savedState = await windowStateManager.getWindowState();
+      
+      if (savedState) {
+        const validated = windowStateManager.validateBounds(savedState, screenWidth, screenHeight);
+        this._baseWindow.setBounds(validated);
+      }
+    } catch (error) {
+      console.warn("Failed to load window state:", error);
+    } finally {
+      // Show window after state is loaded (or if loading fails)
+      this._baseWindow.show();
+    }
+  }
+
+  private saveWindowState(): void {
+    try {
+      const bounds = this._baseWindow.getBounds();
+      const windowStateManager = getWindowStateManager();
+      windowStateManager.saveWindowState({
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      });
+    } catch (error) {
+      console.error("Failed to save window state:", error);
+    }
+  }
+
+  private setupDarkModeListener(): void {
+    // Dark mode is now handled by DarkModeManager
+    // This method is kept for compatibility but does nothing
   }
 
   // Getters
@@ -92,7 +179,17 @@ export class Window {
   // Tab management methods
   createTab(url?: string): Tab {
     const tabId = `tab-${++this.tabCounter}`;
-    const tab = new Tab(tabId, url);
+    // Default new-tab behavior:
+    // - First tab (no existing workspace): open the workspace (blueberry://home)
+    // - Subsequent tabs created without an explicit URL (TopBar + button): open google.com
+    //   to avoid opening multiple workspace tabs (known to cause bugs).
+    const workspaceTabCountBefore = Array.from(this.tabsMap.values()).filter((t) => t.isWorkspacePage).length;
+    const shouldAvoidWorkspaceDuplicate = !url && workspaceTabCountBefore > 0;
+    const initialUrl = shouldAvoidWorkspaceDuplicate ? "https://www.google.com" : (url ?? "blueberry://home");
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/e1ac0707-feb3-482d-ac8f-58cfcccea29a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'tabs-1',hypothesisId:'H1',location:'src/main/Window.ts:createTab',message:'window_create_tab',data:{tabId, urlArg:url, initialUrl, tabCountBefore:this.tabsMap.size, workspaceTabCountBefore},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    const tab = new Tab(tabId, initialUrl);
 
     // Add the tab's WebContentsView to the window
     this._baseWindow.contentView.addChildView(tab.view);
@@ -249,7 +346,7 @@ export class Window {
   private updateTabBounds(): void {
     const bounds = this._baseWindow.getBounds();
     // Only subtract sidebar width if it's visible
-    const sidebarWidth = this._sideBar.getIsVisible() ? 400 : 0;
+    const sidebarWidth = this._sideBar.getIsVisible() ? this._sideBar.getWidth() : 0;
 
     this.tabsMap.forEach((tab) => {
       tab.view.setBounds({
@@ -265,6 +362,25 @@ export class Window {
   updateAllBounds(): void {
     this.updateTabBounds();
     this._sideBar.updateBounds();
+  }
+
+  // Bring topbar to front (for popups to appear above other views)
+  bringTopBarToFront(): void {
+    const topBarView = this._topBar.view;
+    // Expand first (while still in place) to avoid flash
+    this._topBar.expandForPopups();
+    // Then remove and re-add to bring to front
+    try {
+      this._baseWindow.contentView.removeChildView(topBarView);
+      this._baseWindow.contentView.addChildView(topBarView);
+    } catch (error) {
+      console.error('Failed to bring topbar to front:', error);
+    }
+  }
+
+  // Restore topbar to normal size
+  restoreTopBarBounds(): void {
+    this._topBar.restoreBounds();
   }
 
   // Getter for sidebar to access from main process

@@ -1,0 +1,18 @@
+{
+    "mcpServers":  {
+                       "filesystem":  {
+                                          "args":  [
+                                                       "-y",
+                                                       "@modelcontextprotocol/server-filesystem",
+                                                       "C:\\Users\\Slim\\Documents\\Strawberry_AI\\peach-browser"
+                                                   ],
+                                          "command":  "npx"
+                                      },
+                       "typescript-electron-knowledge":  {
+                                                             "args":  [
+                                                                          "mcp-servers\\typescript-electron-knowledge\\dist\\index.js"
+                                                                      ],
+                                                             "command":  "node"
+                                                         }
+                   }
+}

@@ -28,6 +28,15 @@ interface TopBarAPI {
 
   // Sidebar
   toggleSidebar: () => Promise<void>;
+  
+  // Bring topbar to front (for popups)
+  bringToFront: () => Promise<void>;
+  
+  // Restore topbar bounds
+  restoreBounds: () => Promise<void>;
+  
+  // Show item in folder (file system)
+  showItemInFolder: (path: string) => Promise<void>;
 }
 
 declare global {

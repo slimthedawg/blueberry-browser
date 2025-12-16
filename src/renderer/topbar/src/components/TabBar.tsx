@@ -91,9 +91,9 @@ export const TabBar: React.FC = () => {
     }
 
     return (
-        <div className="flex-1 overflow-x-hidden flex items-center h-full">
+        <div className="flex-1 flex items-center h-full min-w-0">
             {/* macOS traffic lights spacing */}
-            <div className="pl-20" />
+            <div className="pl-20 flex-shrink-0" />
 
             {/* Tabs Container - Scrollable */}
             <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center gap-0.5 min-w-0 scrollbar-hide">
@@ -115,16 +115,13 @@ export const TabBar: React.FC = () => {
                             />
                         ))
                     )}
-                </div>
-            </div>
-
-            {/* Add Tab Button - Always visible */}
-            <div className="flex-shrink-0 pl-1 pr-2">
+                    {/* Add Tab Button inline with tabs so it stays at the far right */}
                 <TabBarButton
                     Icon={Plus}
                     onClick={handleCreateTab}
-                    className="h-8 w-8"
+                        className="h-8 w-8 flex-shrink-0 ml-1"
                 />
+                </div>
             </div>
         </div>
     )

@@ -1,5 +1,7 @@
-import { ipcMain, WebContents } from "electron";
+import { ipcMain, shell, WebContents } from "electron";
 import type { Window } from "./Window";
+import { getWorkspaceAIChat } from "./WorkspaceAIChat";
+import { getRecordingManager } from "./RecordingManager";
 
 export class EventManager {
   private mainWindow: Window;
@@ -13,8 +15,14 @@ export class EventManager {
     // Tab management events
     this.handleTabEvents();
 
+    // Topbar events (popups, etc.)
+    this.handleTopBarEvents();
+
     // Sidebar events
     this.handleSidebarEvents();
+
+    // Workspace AI chat (topbar widget/workspace customization chat)
+    this.handleWorkspaceAIChatEvents();
 
     // Page content events
     this.handlePageContentEvents();
@@ -29,10 +37,68 @@ export class EventManager {
     this.handleDebugEvents();
   }
 
+  private async notifyWorkspaceTabsToRefresh(reason: string): Promise<void> {
+    const workspaceTabs = this.mainWindow.allTabs.filter((t) => t.isWorkspacePage);
+    if (workspaceTabs.length === 0) return;
+
+    console.log(
+      `[EventManager] Notifying ${workspaceTabs.length} workspace tab(s) to refresh (${reason})`
+    );
+
+    await Promise.allSettled(
+      workspaceTabs.map((tab) =>
+        tab.webContents.executeJavaScript(`
+          (function() {
+            window.__workspaceNeedsRefresh = true;
+            return true;
+          })();
+        `)
+      )
+    );
+  }
+
+  private handleWorkspaceAIChatEvents(): void {
+    ipcMain.handle("workspace-ai-chat", async (_event, message: string) => {
+      const reply = await getWorkspaceAIChat().handleMessage(message);
+      // Ensure open workspace pages update immediately after mutations
+      await this.notifyWorkspaceTabsToRefresh("workspace-ai-chat");
+      return reply;
+    });
+  }
+
+  private handleTopBarEvents(): void {
+    ipcMain.handle("topbar-bring-to-front", () => {
+      this.mainWindow.bringTopBarToFront();
+      return true;
+    });
+
+    ipcMain.handle("topbar-restore-bounds", () => {
+      this.mainWindow.restoreTopBarBounds();
+      return true;
+    });
+
+    ipcMain.handle("show-item-in-folder", (_event, path: string) => {
+      if (!path) return false;
+      try {
+        shell.showItemInFolder(path);
+        return true;
+      } catch (error) {
+        console.warn("Failed to show item in folder:", error);
+        return false;
+      }
+    });
+  }
+
   private handleTabEvents(): void {
     // Create new tab
     ipcMain.handle("create-tab", (_, url?: string) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/e1ac0707-feb3-482d-ac8f-58cfcccea29a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'tabs-1',hypothesisId:'H1',location:'src/main/EventManager.ts:create-tab',message:'ipc_create_tab_called',data:{urlArg:url,activeTabId:this.mainWindow.activeTab?.id,activeTabUrl:this.mainWindow.activeTab?.url,tabCount:this.mainWindow.allTabs.length,workspaceTabCount:this.mainWindow.allTabs.filter(t=>t.isWorkspacePage).length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const newTab = this.mainWindow.createTab(url);
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/e1ac0707-feb3-482d-ac8f-58cfcccea29a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'tabs-1',hypothesisId:'H2',location:'src/main/EventManager.ts:create-tab',message:'ipc_create_tab_result',data:{newTabId:newTab.id,newTabUrl:newTab.url,newTabIsWorkspacePage:newTab.isWorkspacePage,tabCountAfter:this.mainWindow.allTabs.length,workspaceTabCountAfter:this.mainWindow.allTabs.filter(t=>t.isWorkspacePage).length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return { id: newTab.id, title: newTab.title, url: newTab.url };
     });
 
@@ -160,10 +226,28 @@ export class EventManager {
       return true;
     });
 
+    // Resize sidebar (used by SidebarResizeHandle)
+    ipcMain.handle("sidebar-resize", (_event, width: number) => {
+      this.mainWindow.sidebar.setWidth(width);
+      // Sidebar width affects tab bounds
+      this.mainWindow.updateAllBounds();
+      return true;
+    });
+
+    // Get sidebar width
+    ipcMain.handle("sidebar-get-width", () => {
+      return this.mainWindow.sidebar.getWidth();
+    });
+
     // Chat message
     ipcMain.handle("sidebar-chat-message", async (_, request) => {
       // The LLMClient now handles getting the screenshot and context directly
       await this.mainWindow.sidebar.client.sendChatMessage(request);
+    });
+
+    ipcMain.handle("sidebar-abort-chat", () => {
+      this.mainWindow.sidebar.client.abortCurrentRequest();
+      return true;
     });
 
     // Clear chat
@@ -175,6 +259,60 @@ export class EventManager {
     // Get messages
     ipcMain.handle("sidebar-get-messages", () => {
       return this.mainWindow.sidebar.client.getMessages();
+    });
+
+    // Recording controls
+    ipcMain.handle("recording-start", (_event, name?: string) => {
+      return getRecordingManager().startRecording(name);
+    });
+
+    ipcMain.handle("recording-stop", () => {
+      return getRecordingManager().stopRecording();
+    });
+
+    ipcMain.handle("recording-pause", () => {
+      getRecordingManager().pauseRecording();
+      return true;
+    });
+
+    ipcMain.handle("recording-resume", () => {
+      getRecordingManager().resumeRecording();
+      return true;
+    });
+
+    ipcMain.handle("recording-get-state", () => {
+      return getRecordingManager().getRecordingState();
+    });
+
+    ipcMain.handle("recording-get-list", () => {
+      return getRecordingManager().getRecordingsList();
+    });
+
+    ipcMain.handle("recording-load", (_event, id: string) => {
+      return getRecordingManager().loadRecording(id);
+    });
+
+    ipcMain.handle("recording-delete", (_event, id: string) => {
+      return getRecordingManager().deleteRecording(id);
+    });
+
+    ipcMain.handle("recording-rename", (_event, id: string, newName: string) => {
+      return getRecordingManager().renameRecording(id, newName);
+    });
+
+    ipcMain.handle("recording-get-directory", () => {
+      return getRecordingManager().getRecordingsDir();
+    });
+
+    ipcMain.handle("recording-open-directory", async () => {
+      const dir = getRecordingManager().getRecordingsDir();
+      try {
+        await shell.openPath(dir);
+        return true;
+      } catch (error) {
+        console.warn("Failed to open recordings directory:", error);
+        return false;
+      }
     });
   }
 

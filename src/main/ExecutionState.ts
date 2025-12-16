@@ -11,6 +11,30 @@ export interface FailedStepInfo {
   taskType: string;
 }
 
+export interface RecordingExecutionState {
+  recordingId: string | null;
+  currentActionIndex: number;
+  actionsExecuted: number;
+  batchCount: number;
+  totalActions: number;
+}
+
+export interface VisualContextSnapshot {
+  path: string;
+  url?: string;
+  name?: string;
+  capturedAt: number;
+  reason?: string;
+}
+
+export interface DomSnapshotSummary {
+  url?: string;
+  capturedAt: number;
+  elementCount: number;
+  summaryText?: string;
+  sampleSelectors?: string[];
+}
+
 export interface ExecutionState {
   originalPlan: ActionPlan;
   currentPlan: ActionPlan;
@@ -23,8 +47,11 @@ export interface ExecutionState {
     pageElements?: any[];
     lastPageContent?: string;
     lastPageAnalysis?: any;
+    lastScreenshot?: VisualContextSnapshot;
+    lastDomSnapshot?: DomSnapshotSummary;
   };
   taskFailureCounts: Map<string, number>;
+  recordingExecution: RecordingExecutionState | null;
 }
 
 export function createExecutionState(plan: ActionPlan): ExecutionState {
@@ -35,8 +62,16 @@ export function createExecutionState(plan: ActionPlan): ExecutionState {
     failedSteps: new Map(),
     observations: [],
     goalAchieved: false,
-    context: {},
+    context: {
+      currentUrl: undefined,
+      pageElements: undefined,
+      lastPageContent: undefined,
+      lastPageAnalysis: undefined,
+      lastScreenshot: undefined,
+      lastDomSnapshot: undefined,
+    },
     taskFailureCounts: new Map(),
+    recordingExecution: null,
   };
 }
 

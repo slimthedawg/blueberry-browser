@@ -3,6 +3,7 @@ import { electronApp } from "@electron-toolkit/utils";
 import { Window } from "./Window";
 import { AppMenu } from "./Menu";
 import { EventManager } from "./EventManager";
+import { FileLock } from "./utils/FileLock";
 
 let mainWindow: Window | null = null;
 let eventManager: EventManager | null = null;
@@ -15,8 +16,11 @@ const createWindow = (): Window => {
   return window;
 };
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId("com.electron");
+
+  // Clean up stale file locks on startup
+  await FileLock.cleanupStaleLocks();
 
   mainWindow = createWindow();
 

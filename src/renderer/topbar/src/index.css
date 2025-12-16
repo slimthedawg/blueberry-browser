@@ -64,9 +64,14 @@
       sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: transparent;
     height: 100vh;
     overflow: hidden;
+  }
+  
+  #root {
+    background: transparent;
   }
 }
 
