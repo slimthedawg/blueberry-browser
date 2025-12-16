@@ -25,6 +25,8 @@ const sidebarAPI = {
 
   clearChat: () => electronAPI.ipcRenderer.invoke("sidebar-clear-chat"),
 
+  abortChat: () => electronAPI.ipcRenderer.invoke("sidebar-abort-chat"),
+
   getMessages: () => electronAPI.ipcRenderer.invoke("sidebar-get-messages"),
 
   onChatResponse: (callback: (data: ChatResponse) => void) => {
@@ -82,12 +84,20 @@ const sidebarAPI = {
     electronAPI.ipcRenderer.on("agent-current-step", (_, step) => callback(step));
   },
 
+  onAgentContextUpdate: (callback: (context: any) => void) => {
+    electronAPI.ipcRenderer.on("agent-context-update", (_, context) => callback(context));
+  },
+
   removeAgentActionPlanListener: () => {
     electronAPI.ipcRenderer.removeAllListeners("agent-action-plan");
   },
 
   removeAgentCurrentStepListener: () => {
     electronAPI.ipcRenderer.removeAllListeners("agent-current-step");
+  },
+
+  removeAgentContextListener: () => {
+    electronAPI.ipcRenderer.removeAllListeners("agent-context-update");
   },
 
   // User guidance for element selection
@@ -102,6 +112,23 @@ const sidebarAPI = {
   removeAgentGuidanceListener: () => {
     electronAPI.ipcRenderer.removeAllListeners("agent-guidance-request");
   },
+
+  // Recording functionality
+  recordingStart: (name?: string) => electronAPI.ipcRenderer.invoke("recording-start", name),
+  recordingStop: () => electronAPI.ipcRenderer.invoke("recording-stop"),
+  recordingPause: () => electronAPI.ipcRenderer.invoke("recording-pause"),
+  recordingResume: () => electronAPI.ipcRenderer.invoke("recording-resume"),
+  recordingGetState: () => electronAPI.ipcRenderer.invoke("recording-get-state"),
+  recordingGetList: () => electronAPI.ipcRenderer.invoke("recording-get-list"),
+  recordingLoad: (id: string) => electronAPI.ipcRenderer.invoke("recording-load", id),
+  recordingDelete: (id: string) => electronAPI.ipcRenderer.invoke("recording-delete", id),
+  recordingRename: (id: string, newName: string) => electronAPI.ipcRenderer.invoke("recording-rename", id, newName),
+  recordingGetDirectory: () => electronAPI.ipcRenderer.invoke("recording-get-directory"),
+  recordingOpenDirectory: () => electronAPI.ipcRenderer.invoke("recording-open-directory"),
+ 
+  // Sidebar resize
+  resizeSidebar: (width: number) => electronAPI.ipcRenderer.invoke("sidebar-resize", width),
+  getSidebarWidth: () => electronAPI.ipcRenderer.invoke("sidebar-get-width"),
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

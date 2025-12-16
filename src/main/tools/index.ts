@@ -18,6 +18,8 @@ import { writeFile } from "./implementations/filesystem/writeFile";
 import { listDirectory } from "./implementations/filesystem/listDirectory";
 import { googleSearch } from "./implementations/search/googleSearch";
 import { executePython } from "./implementations/code/executePython";
+import { executeRecording } from "./implementations/browser/executeRecording";
+import { listRecordings } from "./implementations/browser/listRecordings";
 
 export function createToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -36,6 +38,8 @@ export function createToolRegistry(): ToolRegistry {
     closeTab,
     selectSuggestion,
     captureScreenshot,
+    executeRecording,
+    listRecordings,
     // Filesystem tools
     readFile,
     writeFile,

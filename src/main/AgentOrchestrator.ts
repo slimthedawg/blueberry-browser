@@ -7,10 +7,11 @@ import { join } from "path";
 import type { Window } from "./Window";
 import { ToolRegistry, createToolRegistry } from "./tools";
 import type { ToolResult } from "./tools/ToolDefinition";
-import type { ExecutionState } from "./ExecutionState";
+import type { ExecutionState, DomSnapshotSummary, VisualContextSnapshot } from "./ExecutionState";
 import { createExecutionState } from "./ExecutionState";
 import { classifyError } from "./ErrorClassifier";
 import { getBrowserStateManager } from "./BrowserStateManager";
+import { getRecordingManager } from "./RecordingManager";
 
 dotenv.config({ path: join(__dirname, "../.env") });
 
@@ -43,6 +44,15 @@ export interface ReasoningUpdate {
   toolName?: string;
 }
 
+interface PlanningContext {
+  screenshot?: VisualContextSnapshot;
+  domSnapshot?: DomSnapshotSummary;
+  domElements?: any[];
+}
+
+const SCREENSHOT_REFRESH_INTERVAL = 8000; // ms
+const DOM_REFRESH_INTERVAL = 15000; // ms
+
 export class AgentOrchestrator {
   private readonly webContents: WebContents;
   private window: Window | null = null;
@@ -53,6 +63,8 @@ export class AgentOrchestrator {
   private executionResults: Array<{ step: number; result: ToolResult }> = [];
   private onAssistantMessage: ((msg: CoreMessage) => void) | null = null;
   private executionState: ExecutionState | null = null;
+  private planningContext: PlanningContext = {};
+  private lastContextBroadcast: string | null = null;
 
   constructor(webContents: WebContents, window: Window, onAssistantMessage?: (msg: CoreMessage) => void) {
     this.webContents = webContents;
@@ -193,6 +205,183 @@ export class AgentOrchestrator {
     return observationText;
   }
 
+  private async ensurePlanningContext(reason: string, options: { force?: boolean } = {}): Promise<void> {
+    const tab = this.window?.activeTab;
+    if (!tab) {
+      return;
+    }
+
+    const url = tab.url;
+    if (!this.isValidPageUrl(url)) {
+      return;
+    }
+
+    const force = options.force === true;
+    await this.captureScreenshotContext(tab.id, url, reason, force);
+    await this.captureDomContext(tab.id, url, reason, force);
+  }
+
+  private async captureScreenshotContext(tabId: string, url: string, reason: string, force: boolean): Promise<void> {
+    const lastShot = this.planningContext.screenshot;
+    const now = Date.now();
+    const needsScreenshot =
+      force ||
+      !lastShot ||
+      lastShot.url !== url ||
+      now - (lastShot?.capturedAt || 0) > SCREENSHOT_REFRESH_INTERVAL;
+
+    if (!needsScreenshot) {
+      return;
+    }
+
+    try {
+      const result = await this.toolRegistry.execute(
+        "capture_screenshot",
+        { tabId, name: `plan-${Date.now()}` },
+        tabId
+      );
+
+      if (result.success && result.result?.path) {
+        const snapshot: VisualContextSnapshot = {
+          path: result.result.path,
+          url: result.result.url || url,
+          name: result.result.name,
+          capturedAt: result.result.timestamp || now,
+          reason,
+        };
+        this.planningContext.screenshot = snapshot;
+        this.syncPlanningContextToExecution();
+        this.sendContextUpdate();
+      } else if (!result.success) {
+        console.warn("[Agent] Failed to auto-capture screenshot:", result.error);
+      }
+    } catch (error) {
+      console.warn("[Agent] Screenshot capture error:", error);
+    }
+  }
+
+  private async captureDomContext(tabId: string, url: string, reason: string, force: boolean): Promise<void> {
+    const lastDom = this.planningContext.domSnapshot;
+    const now = Date.now();
+    const needsDom =
+      force ||
+      !lastDom ||
+      lastDom.url !== url ||
+      now - (lastDom?.capturedAt || 0) > DOM_REFRESH_INTERVAL;
+
+    if (!needsDom) {
+      return;
+    }
+
+    try {
+      const result = await this.toolRegistry.execute(
+        "analyze_page_structure",
+        { tabId },
+        tabId
+      );
+
+      if (result.success && result.result) {
+        const elements = result.result.elements || [];
+        const sampleSelectors = elements
+          .map((el: any) => el.selector)
+          .filter((selector: string | null | undefined) => typeof selector === "string" && selector.trim().length > 0)
+          .slice(0, 5);
+
+        const summaryCounts = result.result.summary || {};
+        const summaryParts: string[] = [];
+        if (typeof summaryCounts.inputs === "number") summaryParts.push(`${summaryCounts.inputs} inputs`);
+        if (typeof summaryCounts.buttons === "number") summaryParts.push(`${summaryCounts.buttons} buttons/links`);
+        if (typeof summaryCounts.selects === "number") summaryParts.push(`${summaryCounts.selects} selects`);
+        if (typeof summaryCounts.links === "number") summaryParts.push(`${summaryCounts.links} links`);
+
+        const domSnapshot: DomSnapshotSummary = {
+          url: result.result.url || url,
+          capturedAt: now,
+          elementCount: result.result.elementCount || elements.length,
+          summaryText: summaryParts.join(", "),
+          sampleSelectors,
+        };
+
+        this.planningContext.domSnapshot = domSnapshot;
+        this.planningContext.domElements = elements;
+
+        if (this.executionState) {
+          this.executionState.context.pageElements = elements;
+          this.executionState.context.lastPageAnalysis = result.result;
+        }
+
+        this.syncPlanningContextToExecution();
+        this.sendContextUpdate();
+      } else if (!result.success) {
+        console.warn("[Agent] Failed to auto-analyze page structure:", result.error);
+      }
+    } catch (error) {
+      console.warn("[Agent] DOM analysis error:", error);
+    }
+  }
+
+  private isValidPageUrl(url?: string): boolean {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    if (lower === "about:blank") return false;
+    if (lower.startsWith("chrome://") || lower.startsWith("edge://")) return false;
+    if (lower.startsWith("devtools://")) return false;
+    return true;
+  }
+
+  private syncPlanningContextToExecution(): void {
+    if (!this.executionState) {
+      return;
+    }
+
+    if (this.planningContext.screenshot) {
+      this.executionState.context.lastScreenshot = this.planningContext.screenshot;
+    }
+
+    if (this.planningContext.domSnapshot) {
+      this.executionState.context.lastDomSnapshot = this.planningContext.domSnapshot;
+    }
+
+    if (this.planningContext.domElements) {
+      this.executionState.context.pageElements = this.planningContext.domElements;
+    }
+  }
+
+  private sendContextUpdate(): void {
+    const payload = {
+      screenshot: this.planningContext.screenshot,
+      domSnapshot: this.planningContext.domSnapshot,
+    };
+
+    const serialized = JSON.stringify(payload);
+    if (serialized === this.lastContextBroadcast) {
+      return;
+    }
+
+    this.lastContextBroadcast = serialized;
+    this.webContents.send("agent-context-update", payload);
+  }
+
+  private buildVisualContextString(snapshot?: VisualContextSnapshot): string {
+    if (!snapshot) {
+      return "No screenshot captured yet.";
+    }
+
+    const timestamp = new Date(snapshot.capturedAt).toLocaleTimeString();
+    return `Screenshot captured at ${timestamp} from ${snapshot.url || "unknown URL"} (reason: ${snapshot.reason || "context"}).`;
+  }
+
+  private buildDomContextString(snapshot?: DomSnapshotSummary): string {
+    if (!snapshot) {
+      return "No DOM snapshot available.";
+    }
+
+    const timestamp = new Date(snapshot.capturedAt).toLocaleTimeString();
+    const selectors = snapshot.sampleSelectors?.length ? snapshot.sampleSelectors.join(", ") : "n/a";
+    const summary = snapshot.summaryText ? ` (${snapshot.summaryText})` : "";
+    return `DOM snapshot at ${timestamp}: ${snapshot.elementCount} elements${summary}. Sample selectors: ${selectors}`;
+  }
+
   async processRequest(userMessage: string, messageId: string): Promise<void> {
     if (!this.model) {
       this.sendError(messageId, "LLM service is not configured. Please add your API key to the .env file.");
@@ -200,6 +389,8 @@ export class AgentOrchestrator {
     }
 
     try {
+      this.planningContext = {};
+      this.lastContextBroadcast = null;
       // Reset state
       this.executionResults = [];
 
@@ -208,6 +399,8 @@ export class AgentOrchestrator {
         type: "planning",
         content: "Analyzing your request and creating an action plan...",
       });
+
+      await this.ensurePlanningContext("initial-plan");
 
       let plan: ActionPlan;
       try {
@@ -222,6 +415,80 @@ export class AgentOrchestrator {
         });
         this.sendError(messageId, `Failed to create action plan: ${errorMsg}. Please try rephrasing your request or check the console for details.`);
         return;
+      }
+
+      // Ensure we honor explicit recording requests even if the planner omits execute_recording
+      const recordingIntent = this.detectRecordingIntent(userMessage);
+      console.log(
+        `[Agent] Post-plan recording intent -> id: ${
+          recordingIntent.recordingId ?? "none"
+        }, confidence: ${recordingIntent.confidence.toFixed(2)}`
+      );
+      
+      // Normalize any execute_recording steps that use names instead of IDs
+      const recordingManager = getRecordingManager();
+      if (plan) {
+        for (const step of plan.steps) {
+          if (step.tool === "execute_recording" && step.parameters?.recordingId) {
+            const providedId = step.parameters.recordingId;
+            // If it's not a recording-* ID, try to find the recording by name
+            if (!providedId.startsWith("recording-")) {
+              const allRecordings = recordingManager.getRecordingsList();
+              const match = allRecordings.find(
+                r => r.name.toLowerCase() === providedId.toLowerCase() ||
+                     r.id === providedId
+              );
+              if (match) {
+                console.log(`[Agent] Normalized recording name "${providedId}" to ID "${match.id}"`);
+                step.parameters.recordingId = match.id;
+              } else {
+                console.warn(`[Agent] Could not find recording with name/ID: ${providedId}`);
+              }
+            }
+          }
+        }
+      }
+      
+      if (plan && recordingIntent.recordingId && recordingIntent.confidence > 0.5) {
+        const alreadyHasRecordingStep = plan.steps.some((step) => step.tool === "execute_recording");
+        if (!alreadyHasRecordingStep) {
+          const recording = recordingManager.loadRecording(recordingIntent.recordingId);
+          if (recording) {
+            const executeStep: ActionStep = {
+              stepNumber: 1,
+              tool: "execute_recording",
+              parameters: {
+                recordingId: recording.id,
+                startFromAction: 0,
+                maxActions: Math.min(10, recording.actions.length),
+              },
+              reasoning: `User explicitly requested using recording "${recording.name}". Execute it as the template before taking additional steps.`,
+              requiresConfirmation: false,
+            };
+
+            plan.steps = [executeStep, ...(plan.steps || [])];
+            plan.steps.forEach((step, index) => {
+              step.stepNumber = index + 1;
+            });
+
+            console.log(
+              `[Agent] Injecting execute_recording for ${recordingIntent.recordingId} (${recording.name}) with ${recording.actions.length} actions`
+            );
+
+            await this.streamReasoning({
+              type: "planning",
+              content: `Detected explicit recording request. Injected execute_recording step for ${recording.name}.`,
+            });
+          } else {
+            console.warn(
+              `[Agent] Recording intent detected (${recordingIntent.recordingId}) but loadRecording returned null`
+            );
+            await this.streamReasoning({
+              type: "error",
+              content: `Recording ${recordingIntent.recordingId} was requested but could not be loaded. Please verify it exists in the Recording tab.`,
+            });
+          }
+        }
       }
 
       await this.streamReasoning({
@@ -248,6 +515,7 @@ export class AgentOrchestrator {
 
       // Initialize execution state
       this.executionState = createExecutionState(plan);
+      this.syncPlanningContextToExecution();
 
       // Send action plan to UI for display
       this.webContents.send("agent-action-plan", {
@@ -311,7 +579,12 @@ export class AgentOrchestrator {
         // Execute the step
         let result: ToolResult;
         try {
-          result = await this.toolRegistry.execute(step.tool, stepParams, currentTabId);
+          // Special handling for execute_recording tool
+          if (step.tool === "execute_recording") {
+            result = await this.handleRecordingExecution(step, stepParams, currentTabId, userMessage);
+          } else {
+            result = await this.toolRegistry.execute(step.tool, stepParams, currentTabId);
+          }
           
           // Stream result immediately with better context
           if (result.success) {
@@ -499,15 +772,104 @@ export class AgentOrchestrator {
           break;
         }
 
-        // Only replan when needed (after failures, when stuck)
-        if (await this.shouldReplan(step, result)) {
+        // Check if we should replan after recording batch (every batch)
+        // Only replan if:
+        // 1. This was an execute_recording step
+        // 2. It succeeded
+        // 3. The recording execution state exists
+        // 4. The recording is NOT complete (check both the result flag and the state)
+        const recordingCompleted = result.result?.completed === true || 
+          (this.executionState?.recordingExecution && 
+           this.executionState.recordingExecution.currentActionIndex >= this.executionState.recordingExecution.totalActions);
+        
+        if (step.tool === "execute_recording" && recordingCompleted) {
+          console.log(`[Agent] Recording execution complete: ${this.executionState.recordingExecution?.actionsExecuted || 0} actions executed`);
+          await this.streamReasoning({
+            type: "completed",
+            content: `Recording execution complete. All ${this.executionState.recordingExecution?.totalActions || 0} actions have been executed.`,
+          });
+        }
+        
+        const shouldReplanAfterRecording = step.tool === "execute_recording" && 
+          result.success && 
+          result.result &&
+          this.executionState?.recordingExecution &&
+          this.executionState.recordingExecution.batchCount > 0 &&
+          !recordingCompleted; // Only replan if recording is NOT complete
+        
+        // Only replan when needed (after failures, when stuck, or after recording batch)
+        if (shouldReplanAfterRecording || await this.shouldReplan(step, result)) {
+          const replanReason = shouldReplanAfterRecording 
+            ? `Re-evaluating plan after recording batch ${this.executionState.recordingExecution?.batchCount}...`
+            : `Re-evaluating plan after step ${step.stepNumber}...`;
+          
           await this.streamReasoning({
             type: "planning",
-            content: `Re-evaluating plan after step ${step.stepNumber}...`,
+            content: replanReason,
           });
 
-          const newPlan = await this.replanWithContext(userMessage, this.executionState);
+          // Include recording context in replanning
+          const replanContext = shouldReplanAfterRecording && this.executionState?.recordingExecution
+            ? `\n\nCRITICAL: We are executing a recording (ID: ${this.executionState.recordingExecution.recordingId}).
+- Actions executed so far: ${this.executionState.recordingExecution.actionsExecuted} of ${this.executionState.recordingExecution.totalActions}
+- Current action index: ${this.executionState.recordingExecution.currentActionIndex}
+- Batch count: ${this.executionState.recordingExecution.batchCount}
+- Last batch result: ${result.message || "Success"}
+
+IMPORTANT: The recording is NOT complete. You MUST continue executing it by using execute_recording with:
+- recordingId: "${this.executionState.recordingExecution.recordingId}" (REQUIRED - use exact ID)
+- startFromAction: ${this.executionState.recordingExecution.currentActionIndex} (continue from here)
+- maxActions: 10 (execute next batch)
+
+DO NOT switch to other tools like execute_python or read_page_content. Continue the recording execution until all actions are complete.`
+            : "";
+
+          const newPlan = await this.replanWithContext(userMessage + replanContext, this.executionState);
           if (newPlan && newPlan.steps.length > 0) {
+            // Check if new plan continues with recording
+            const continuesRecording = newPlan.steps.some(s => s.tool === "execute_recording");
+            
+            if (continuesRecording && this.executionState?.recordingExecution) {
+              // Continue recording from where we left off - preserve recordingId and set startFromAction
+              const continueStep = newPlan.steps.find(s => s.tool === "execute_recording");
+              if (continueStep) {
+                const newStartFromAction = this.executionState.recordingExecution.currentActionIndex;
+                const remainingActions = this.executionState.recordingExecution.totalActions - newStartFromAction;
+                const newMaxActions = Math.min(10, remainingActions);
+                
+                // Check if recording is actually complete or if we're stuck
+                if (remainingActions <= 0 || newMaxActions <= 0) {
+                  console.log(`[Agent] Recording complete: ${this.executionState.recordingExecution.currentActionIndex}/${this.executionState.recordingExecution.totalActions} actions executed. No more actions to execute.`);
+                  await this.streamReasoning({
+                    type: "completed",
+                    content: `Recording execution complete. All ${this.executionState.recordingExecution.totalActions} actions have been executed. Moving on to next steps.`,
+                  });
+                  // Remove the execute_recording step to break the loop
+                  newPlan.steps = newPlan.steps.filter(s => s.tool !== "execute_recording");
+                  // Renumber remaining steps
+                  newPlan.steps.forEach((s, idx) => {
+                    s.stepNumber = idx + 1;
+                  });
+                  if (newPlan.steps.length === 0) {
+                    // If no other steps, add a placeholder
+                    newPlan.steps.push({
+                      stepNumber: 1,
+                      tool: "none",
+                      parameters: {},
+                      reasoning: "Recording complete. Ready for next steps.",
+                      requiresConfirmation: false,
+                    });
+                  }
+                } else {
+                  // CRITICAL: Preserve the recordingId from execution state
+                  continueStep.parameters.recordingId = this.executionState.recordingExecution.recordingId;
+                  continueStep.parameters.startFromAction = newStartFromAction;
+                  continueStep.parameters.maxActions = newMaxActions;
+                  console.log(`[Agent] Preserved recordingId ${continueStep.parameters.recordingId} and set startFromAction=${newStartFromAction} for continuation (${newMaxActions} actions remaining, ${remainingActions} total remaining)`);
+                }
+              }
+            }
+            
             // Update plan
             this.executionState.currentPlan = newPlan;
             
@@ -549,6 +911,128 @@ export class AgentOrchestrator {
       });
       this.sendError(messageId, `Agent error: ${errorMsg}`);
     }
+  }
+
+  /**
+   * Handle recording execution - executes recording steps and manages batch replanning
+   */
+  private async handleRecordingExecution(
+    step: ActionStep,
+    stepParams: Record<string, any>,
+    currentTabId: string | undefined,
+    userMessage: string
+  ): Promise<ToolResult> {
+    // Execute the recording tool
+    const result = await this.toolRegistry.execute(step.tool, stepParams, currentTabId);
+    
+    if (!result.success || !result.result) {
+      return result;
+    }
+
+    const recordingResult = result.result as any;
+    const steps = recordingResult.steps as ActionStep[];
+    
+    if (!steps || steps.length === 0) {
+      return result;
+    }
+
+    // Initialize recording execution state if needed
+    if (!this.executionState) {
+      return {
+        success: false,
+        error: "Execution state not available",
+      };
+    }
+
+    if (!this.executionState.recordingExecution) {
+      this.executionState.recordingExecution = {
+        recordingId: recordingResult.recordingId,
+        currentActionIndex: recordingResult.currentActionIndex || 0,
+        actionsExecuted: 0,
+        batchCount: 0,
+        totalActions: recordingResult.totalActions || 0,
+      };
+    }
+
+    // Execute each step from the recording
+    const executionResults: Array<{ step: ActionStep; result: ToolResult }> = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const recordingStep of steps) {
+      // Update step number to be sequential
+      if (this.executionState && this.executionState.completedSteps) {
+        recordingStep.stepNumber = this.executionState.completedSteps.length + executionResults.length + 1;
+      }
+      
+      // Update current step in UI
+      this.webContents.send("agent-current-step", recordingStep.stepNumber);
+
+      await this.streamReasoning({
+        type: "executing",
+        content: `Executing recording step: ${recordingStep.reasoning}`,
+        stepNumber: recordingStep.stepNumber,
+        toolName: recordingStep.tool,
+      });
+
+      // Get tab ID for this step
+      let stepTabId = currentTabId;
+      if (recordingStep.parameters?.tabId) {
+        stepTabId = String(recordingStep.parameters.tabId);
+      }
+
+      // Prepare step parameters
+      const recordingStepParams = { ...recordingStep.parameters };
+      if (stepTabId && !recordingStepParams.tabId) {
+        recordingStepParams.tabId = stepTabId;
+      }
+
+      // Execute the step
+      let stepResult: ToolResult;
+      try {
+        stepResult = await this.toolRegistry.execute(recordingStep.tool, recordingStepParams, stepTabId);
+        
+        if (stepResult.success) {
+          successCount++;
+        } else {
+          failureCount++;
+        }
+      } catch (error) {
+        stepResult = {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        failureCount++;
+      }
+
+      executionResults.push({ step: recordingStep, result: stepResult });
+      if (this.executionState && this.executionState.completedSteps) {
+        this.executionState.completedSteps.push({ step: recordingStep, result: stepResult });
+      }
+      
+      // Observe step result
+      await this.observeStepResult(recordingStep, stepResult, stepTabId);
+    }
+
+    // Update recording execution state
+    if (this.executionState && this.executionState.recordingExecution) {
+      this.executionState.recordingExecution.actionsExecuted += successCount;
+      this.executionState.recordingExecution.currentActionIndex = recordingResult.currentActionIndex;
+      this.executionState.recordingExecution.batchCount++;
+    }
+
+    // Return updated result with execution details
+    return {
+      success: result.success,
+      message: `Executed ${successCount} of ${steps.length} steps from recording batch${failureCount > 0 ? ` (${failureCount} failed)` : ""}`,
+      result: {
+        ...recordingResult,
+        stepsExecuted: steps.length,
+        successCount,
+        failureCount,
+        batchCount: this.executionState?.recordingExecution?.batchCount || 0,
+      },
+    };
   }
 
   /**
@@ -838,6 +1322,7 @@ export class AgentOrchestrator {
     state: ExecutionState
   ): Promise<ActionPlan | null> {
     if (!this.model) return null;
+    await this.ensurePlanningContext("replan");
 
     // Get available tools
     const toolSchemas = this.toolRegistry.getSchemas();
@@ -856,10 +1341,14 @@ export class AgentOrchestrator {
     
     const observationsSummary = state.observations.slice(-5).map(obs => obs.observation).join('\n');
     
+    const screenshotInfo = this.buildVisualContextString(state.context.lastScreenshot || this.planningContext.screenshot);
+    const domInfo = this.buildDomContextString(state.context.lastDomSnapshot || this.planningContext.domSnapshot);
     const contextInfo = `
 Current URL: ${state.context.currentUrl || "Unknown"}
 Page Elements: ${state.context.pageElements?.length || 0} elements available
 Last Page Content: ${state.context.lastPageContent ? state.context.lastPageContent.substring(0, 500) + "..." : "None"}
+Visual Context: ${screenshotInfo}
+DOM Context: ${domInfo}
 `;
 
     const messages: CoreMessage[] = [
@@ -893,6 +1382,8 @@ Your task: Generate a NEW plan that:
 CRITICAL RULES:
 - Each step MUST have a "tool" field with an EXACT tool name from the list above
 - Use ONLY tool names from the "Available tools" list
+- NEVER invent tool names. If the user says things like "repeat" or "repeat the recording", interpret that as rerunning the relevant existing tool (e.g., execute_recording) rather than creating a tool called "repeat".
+- If the context mentions a recording execution in progress, you MUST continue with execute_recording (using the exact recordingId provided) rather than switching to other tools like execute_python or read_page_content. Recordings should be executed to completion before using other tools.
 - Return ONLY a JSON object with this exact structure:
 {
   "goal": "description",
@@ -992,6 +1483,88 @@ Return ONLY the JSON object, no explanations.`,
     }
   }
 
+  /**
+   * Detect if user wants to use a recording
+   */
+  private detectRecordingIntent(userMessage: string): { recordingId: string | null; confidence: number } {
+    const recordingManager = getRecordingManager();
+    const messageLower = userMessage.toLowerCase();
+    
+    // Keywords that suggest recording usage
+    const keywords = [
+      "use recording",
+      "follow recording",
+      "replay recording",
+      "use the recording",
+      "follow the recording",
+      "execute recording",
+      "run recording",
+      "play recording",
+      "see recording",
+      "show recording",
+      "my recording",
+      "hemnet recording",
+      "recording",
+    ];
+    
+    // Check for keyword matches
+    let hasKeyword = false;
+    for (const keyword of keywords) {
+      if (messageLower.includes(keyword)) {
+        hasKeyword = true;
+        break;
+      }
+    }
+    
+    // Search for recording IDs or names in message
+    const allRecordings = recordingManager.getRecordingsList();
+    let bestMatch: { id: string; confidence: number } | null = null;
+    
+    for (const recording of allRecordings) {
+      let confidence = 0;
+      
+      // Check if recording ID is mentioned
+      if (messageLower.includes(recording.id.toLowerCase())) {
+        confidence = 0.9;
+      }
+      
+      // Normalize name to catch underscores/dashes as separate tokens (e.g., "hemnet_automation")
+      const nameWords = recording.name
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .split(/\s+/)
+        .filter(Boolean);
+      let nameMatches = 0;
+      for (const word of nameWords) {
+        if (word.length > 3 && messageLower.includes(word)) {
+          nameMatches++;
+        }
+      }
+      if (nameMatches > 0) {
+        confidence = Math.max(confidence, 0.5 + (nameMatches / nameWords.length) * 0.3);
+      }
+      
+      // If keyword present, boost confidence
+      if (hasKeyword && confidence > 0) {
+        confidence = Math.min(1.0, confidence + 0.2);
+      }
+      
+      if (confidence > 0 && (!bestMatch || confidence > bestMatch.confidence)) {
+        bestMatch = { id: recording.id, confidence };
+      }
+    }
+    
+    // If keyword present but no specific recording found, check if there's only one recording
+    if (hasKeyword && !bestMatch && allRecordings.length === 1) {
+      return { recordingId: allRecordings[0].id, confidence: 0.7 };
+    }
+    
+    return {
+      recordingId: bestMatch?.id || null,
+      confidence: bestMatch?.confidence || 0,
+    };
+  }
+
   private async generateActionPlan(userMessage: string): Promise<ActionPlan> {
     if (!this.model) {
       throw new Error("Model not initialized");
@@ -1002,10 +1575,57 @@ Return ONLY the JSON object, no explanations.`,
       .map((tool) => `- ${tool.name}: ${tool.description}`)
       .join("\n");
 
+    // Check for recording intent
+    const recordingIntent = this.detectRecordingIntent(userMessage);
+    console.log(
+      `[Agent] Planning recording intent -> id: ${
+        recordingIntent.recordingId ?? "none"
+      }, confidence: ${recordingIntent.confidence.toFixed(2)}`
+    );
+    const recordingManager = getRecordingManager();
+    let recordingContext = "";
+    
+    if (recordingIntent.recordingId && recordingIntent.confidence > 0.5) {
+      const recording = recordingManager.loadRecording(recordingIntent.recordingId);
+      if (recording) {
+        const summary = recordingManager.getRecordingSummary(recordingIntent.recordingId);
+        recordingContext = `\n\nRECORDING DETECTED: The user wants to use recording "${recording.name}" (${recordingIntent.recordingId}).
+Recording Summary: ${summary}
+The recording contains ${recording.actions.length} actions.
+
+CRITICAL: When using execute_recording, you MUST:
+1. Use the EXACT recordingId: "${recordingIntent.recordingId}" (not the name "${recording.name}")
+2. Execute the recording in batches (startFromAction: 0, maxActions: 10 initially)
+3. After each batch completes, continue with execute_recording using the next startFromAction index
+4. DO NOT switch to other tools (like execute_python, read_page_content) until the recording is fully executed
+5. The recording will be executed intelligently - it adapts to dynamic content (like lists) rather than just replaying exact actions
+6. After all recording actions are complete, you can then use other tools to extend or modify the automation
+
+Available recordings:
+${recordingManager.getRecordingsList().map(r => `- ${r.name} (${r.id}): ${r.actionCount} actions`).join("\n")}`;
+      }
+    } else {
+      // Still show available recordings for context
+      const recordings = recordingManager.getRecordingsList();
+      if (recordings.length > 0) {
+        recordingContext = `\n\nAvailable recordings (user may want to use one):
+${recordings.map(r => `- ${r.name} (${r.id}): ${r.actionCount} actions`).join("\n")}
+
+If the user mentions a recording or wants to automate based on a previous recording, use the execute_recording tool.`;
+      }
+    }
+
+    const visualContextInfo = this.buildVisualContextString(this.planningContext.screenshot);
+    const domContextInfo = this.buildDomContextString(this.planningContext.domSnapshot);
+
     const systemPrompt = `You are an AI agent that helps users accomplish tasks by breaking them down into steps and executing tools.
 
 Available tools:
-${toolsDescription}
+${toolsDescription}${recordingContext}
+
+Current visual context:
+- ${visualContextInfo}
+- ${domContextInfo}
 
 IMPORTANT DECISION RULES:
 1. **For simple greetings or casual conversation** (hi, hello, hey, how are you, thanks, etc.):
@@ -1015,12 +1635,15 @@ IMPORTANT DECISION RULES:
 2. **For questions about YOUR capabilities or tools**:
    - Create a plan with goal "Explain capabilities" and an empty steps array: {"goal": "Explain capabilities", "steps": []}
    - You know your own tools - respond directly without using read_page_content
+   - **EXCEPTION**: If the user asks about recordings (e.g., "can you see my recording?", "show me recordings", "list recordings", "do I have a hemnet recording?"), use the list_recordings tool to show available recordings
+   - **EXCEPTION**: If the user asks about recordings (e.g., "can you see my recording?", "show me recordings", "list recordings"), use the list_recordings tool to show available recordings
 
 3. **For requests that need tools** (clicking, navigating, reading pages, searching, file operations, etc.):
    - Create a proper action plan with specific steps using the available tools
    - **CRITICAL**: When interacting with web pages (filling forms, clicking buttons), ALWAYS use analyze_page_structure as the FIRST step after navigate_to_url to discover available elements
    - Only use read_page_content when the user explicitly wants to read/analyze page content
    - DO NOT guess selectors - use analyze_page_structure first, then generate steps based on the discovered elements
+   - NEVER invent tool names. If the user says things like "repeat" or "repeat the recording", interpret that as rerunning the last relevant tool (e.g., execute_recording) or restating an existing step. Do not create a tool named "repeat" or similar.
 
 4. **For ambiguous requests**:
    - If it's unclear whether tools are needed, err on the side of creating a conversational plan (empty steps)

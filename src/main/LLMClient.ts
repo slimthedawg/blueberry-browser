@@ -5,7 +5,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import * as dotenv from "dotenv";
 import { join } from "path";
 import type { Window } from "./Window";
-import { AgentOrchestrator } from "./AgentOrchestrator";
+import { LangChainAgentOrchestrator } from "./agent/LangChainAgentOrchestrator";
 
 // Load environment variables from .env file
 dotenv.config({ path: join(__dirname, "../../.env") });
@@ -38,8 +38,9 @@ export class LLMClient {
   private readonly modelName: string;
   private readonly model: LanguageModel | null;
   private messages: CoreMessage[] = [];
-  private agentOrchestrator: AgentOrchestrator | null = null;
+  private agentOrchestrator: LangChainAgentOrchestrator | null = null;
   private agentMode: boolean = false;
+  private currentAbortController: AbortController | null = null;
 
   constructor(webContents: WebContents) {
     this.webContents = webContents;
@@ -53,13 +54,9 @@ export class LLMClient {
   // Set the window reference after construction to avoid circular dependencies
   setWindow(window: Window): void {
     this.window = window;
-    // Initialize agent orchestrator when window is available
+    // Initialize LangChain agent orchestrator when window is available
     if (!this.agentOrchestrator) {
-      this.agentOrchestrator = new AgentOrchestrator(this.webContents, window, (msg: CoreMessage) => {
-        // Callback to add assistant messages to our messages array
-        this.messages.push(msg);
-        this.sendMessagesToRenderer();
-      });
+      this.agentOrchestrator = new LangChainAgentOrchestrator(this.webContents, window);
     }
     // Enable agent mode by default
     this.agentMode = true;
@@ -134,7 +131,22 @@ export class LLMClient {
   }
 
   async sendChatMessage(request: ChatRequest): Promise<void> {
+    console.log(`📨 [LLMClient] sendChatMessage called:`, {
+      messageId: request.messageId,
+      messageLength: request.message.length,
+      agentMode: this.agentMode,
+      hasOrchestrator: !!this.agentOrchestrator,
+      hasModel: !!this.model,
+    });
+
     try {
+      // Abort any existing request
+      this.abortCurrentRequest();
+
+      // Create new abort controller for this request
+      this.currentAbortController = new AbortController();
+      console.log(`🔄 [LLMClient] Starting new request (${request.messageId}), created abort controller`);
+
       // Add user message to conversation history (for both modes)
       const userMessage: CoreMessage = {
         role: "user",
@@ -142,13 +154,18 @@ export class LLMClient {
       };
       this.messages.push(userMessage);
       this.sendMessagesToRenderer();
+      console.log(`💬 [LLMClient] Added user message to history, total messages: ${this.messages.length}`);
 
       // Check if agent mode is enabled
       if (this.agentMode && this.agentOrchestrator) {
+        console.log(`🤖 [LLMClient] Using agent mode, delegating to orchestrator`);
         // Use agent orchestrator for agent mode
-        await this.agentOrchestrator.processRequest(request.message, request.messageId);
+        await this.agentOrchestrator.processRequest(request.message, request.messageId, this.currentAbortController.signal);
+        console.log(`✅ [LLMClient] Agent orchestrator completed`);
         return;
       }
+
+      console.log(`💬 [LLMClient] Using regular chat mode`);
 
       // Regular chat mode (existing behavior)
       // Get screenshot from active tab if available
@@ -202,10 +219,33 @@ export class LLMClient {
       }
 
       const messages = await this.prepareMessagesWithContext(request);
+      console.log(`📝 [LLMClient] Prepared ${messages.length} messages for streaming`);
       await this.streamResponse(messages, request.messageId);
-    } catch (error) {
+      console.log(`✅ [LLMClient] Stream response completed`);
+    } catch (error: any) {
+      // Check if error is due to abort
+      if (error?.name === 'AbortError' || error?.message?.includes('abort')) {
+        console.log(`⏹️ [LLMClient] Request aborted (${request.messageId})`);
+        this.sendErrorMessage(request.messageId, "Request cancelled by user");
+        return;
+      }
       console.error("Error in LLM request:", error);
       this.handleStreamError(error, request.messageId);
+    } finally {
+      // Clear abort controller when done
+      this.currentAbortController = null;
+    }
+  }
+
+  abortCurrentRequest(): void {
+    if (this.currentAbortController) {
+      console.log("⏹️ [LLMClient] Aborting current request");
+      this.currentAbortController.abort();
+      this.currentAbortController = null;
+    }
+    // Also abort agent orchestrator if active
+    if (this.agentOrchestrator) {
+      this.agentOrchestrator.abortCurrentRequest();
     }
   }
 
@@ -291,7 +331,7 @@ export class LLMClient {
         model: this.model,
         messages,
         maxRetries: 3,
-        abortSignal: undefined, // Could add abort controller for cancellation
+        abortSignal: this.currentAbortController?.signal,
       };
       
       // Temperature not supported for reasoning models like gpt-5-nano-2025-08-07

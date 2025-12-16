@@ -23,6 +23,9 @@ export class TopBar {
       },
     });
 
+    // Set transparent background from the start to avoid white flash
+    webContentsView.setBackgroundColor("#00000000");
+
     // Load the TopBar React app
     if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
       // In development, load through Vite dev server
@@ -42,6 +45,8 @@ export class TopBar {
 
   private setupBounds(): void {
     const bounds = this.baseWindow.getBounds();
+    // Always keep background transparent to avoid white flash
+    this.webContentsView.setBackgroundColor("#00000000");
     this.webContentsView.setBounds({
       x: 0,
       y: 0,
@@ -51,6 +56,27 @@ export class TopBar {
   }
 
   updateBounds(): void {
+    this.setupBounds();
+  }
+
+  // Expand topbar to cover full window (for popups) - but keep it transparent
+  expandForPopups(): void {
+    const bounds = this.baseWindow.getBounds();
+    // Ensure background is transparent (no white flash)
+    this.webContentsView.setBackgroundColor("#00000000");
+    // Expand to full window so popups can render anywhere
+    this.webContentsView.setBounds({
+      x: 0,
+      y: 0,
+      width: bounds.width,
+      height: bounds.height,
+    });
+  }
+
+  // Restore normal bounds
+  restoreBounds(): void {
+    // Keep transparent - CSS handles the visual background
+    this.webContentsView.setBackgroundColor("#00000000");
     this.setupBounds();
   }
 

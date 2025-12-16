@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
-import { ArrowUp, Plus } from 'lucide-react'
-import { useChat } from '../contexts/ChatContext'
+import { ArrowUp, Plus, Square } from 'lucide-react'
+import { useChat, type VisualContextData } from '../contexts/ChatContext'
 import { cn } from '@common/lib/utils'
 import { Button } from '@common/components/Button'
 import { ReasoningStep } from './ReasoningStep'
@@ -41,9 +41,17 @@ const useAutoScroll = (messages: Message[]) => {
 
 // User Message Component - appears on the right
 const UserMessage: React.FC<{ content: string }> = ({ content }) => (
-    <div className="relative max-w-[85%] ml-auto animate-fade-in">
-        <div className="bg-muted dark:bg-muted/50 rounded-3xl px-6 py-4">
-            <div className="text-foreground" style={{ whiteSpace: 'pre-wrap' }}>
+    <div className="relative max-w-[85%] ml-auto animate-fade-in break-words">
+        <div className="bg-muted dark:bg-muted/50 rounded-3xl px-6 py-4 overflow-hidden">
+            <div 
+                className="text-foreground break-words overflow-wrap-anywhere" 
+                style={{ 
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                    wordWrap: 'break-word'
+                }}
+            >
                 {content}
             </div>
         </div>
@@ -67,7 +75,14 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
     }, [content, currentIndex])
 
     return (
-        <div className="whitespace-pre-wrap text-foreground">
+        <div 
+            className="whitespace-pre-wrap text-foreground break-words overflow-wrap-anywhere"
+            style={{
+                wordBreak: 'break-word',
+                overflowWrap: 'break-word',
+                wordWrap: 'break-word'
+            }}
+        >
             {displayedContent}
             {currentIndex < content.length && (
                 <span className="inline-block w-2 h-5 bg-primary/60 dark:bg-primary/40 ml-0.5 animate-pulse" />
@@ -78,7 +93,7 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
 
 // Markdown Renderer Component
 const Markdown: React.FC<{ content: string }> = ({ content }) => (
-    <div className="prose prose-sm dark:prose-invert max-w-none 
+    <div className="prose prose-sm dark:prose-invert max-w-none break-words
                     prose-headings:text-foreground prose-p:text-foreground 
                     prose-strong:text-foreground prose-ul:text-foreground 
                     prose-ol:text-foreground prose-li:text-foreground
@@ -86,7 +101,12 @@ const Markdown: React.FC<{ content: string }> = ({ content }) => (
                     prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 
                     prose-code:rounded prose-code:text-sm prose-code:text-foreground
                     prose-pre:bg-muted dark:prose-pre:bg-muted/50 prose-pre:p-3 
-                    prose-pre:rounded-lg prose-pre:overflow-x-auto">
+                    prose-pre:rounded-lg prose-pre:overflow-x-auto"
+         style={{
+             wordBreak: 'break-word',
+             overflowWrap: 'break-word',
+             wordWrap: 'break-word'
+         }}>
         <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
@@ -121,6 +141,73 @@ const Markdown: React.FC<{ content: string }> = ({ content }) => (
     </div>
 )
 
+const toFileUrl = (path: string) => {
+    if (!path) return ''
+    let normalized = path.replace(/\\/g, '/')
+    if (!normalized.startsWith('/')) {
+        normalized = `/${normalized}`
+    }
+    return encodeURI(`file://${normalized}`)
+}
+
+const VisualContextPanel: React.FC<{ context: VisualContextData }> = ({ context }) => {
+    if (!context.screenshot && !context.domSnapshot) {
+        return null
+    }
+
+    const screenshot = context.screenshot
+    const dom = context.domSnapshot
+    const screenshotTime = screenshot ? new Date(screenshot.capturedAt).toLocaleTimeString() : null
+    const domTime = dom ? new Date(dom.capturedAt).toLocaleTimeString() : null
+
+    return (
+        <div className="border border-border rounded-lg p-3 bg-muted/30 dark:bg-muted/20 mb-4">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                <span>Senaste sidstatus</span>
+                {screenshotTime && <span>Bild: {screenshotTime}</span>}
+            </div>
+
+            {screenshot?.path ? (
+                <div className="rounded-md overflow-hidden border border-border/60 bg-black/50">
+                    <img
+                        src={toFileUrl(screenshot.path)}
+                        alt="Senaste skärmdump"
+                        className="w-full max-h-48 object-cover"
+                        loading="lazy"
+                    />
+                </div>
+            ) : (
+                <div className="text-xs text-muted-foreground">Ingen skärmdump tillgänglig.</div>
+            )}
+
+            {screenshot?.url && (
+                <div className="text-[11px] text-muted-foreground mt-2 break-all">
+                    Visar: {screenshot.url}
+                </div>
+            )}
+
+            {dom && (
+                <div className="mt-3 text-xs text-foreground">
+                    <div className="font-medium mb-1">DOM-översikt {domTime ? `(kl ${domTime})` : ''}</div>
+                    <div className="text-muted-foreground mb-1">
+                        {dom.elementCount} interaktiva element{dom.summaryText ? ` (${dom.summaryText})` : ''}
+                    </div>
+                    {dom.sampleSelectors && dom.sampleSelectors.length > 0 && (
+                        <div className="text-muted-foreground">
+                            Exempel på selectors:
+                            <div className="font-mono text-[11px] mt-1 space-y-0.5">
+                                {dom.sampleSelectors.map((selector, idx) => (
+                                    <div key={`selector-${idx}`}>{selector}</div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    )
+}
+
 // Assistant Message Component - appears on the left
 const AssistantMessage: React.FC<{ 
     content: string; 
@@ -135,8 +222,8 @@ const AssistantMessage: React.FC<{
     actionPlan,
     currentStep
 }) => (
-    <div className="relative w-full animate-fade-in">
-        <div className="py-1">
+    <div className="relative w-full animate-fade-in break-words overflow-hidden">
+        <div className="py-1 break-words">
             {actionPlan && (
                 <div className="mb-3">
                     <ActionPlan 
@@ -147,16 +234,21 @@ const AssistantMessage: React.FC<{
                 </div>
             )}
             {reasoning && reasoning.length > 0 && (
-                <div className="mb-3 space-y-1">
-                    {reasoning.map((update, index) => (
-                        <ReasoningStep
-                            key={index}
-                            type={update.type}
-                            content={update.content}
-                            stepNumber={update.stepNumber}
-                            toolName={update.toolName}
-                        />
-                    ))}
+                <div className="mb-4 space-y-1 border-l-2 border-primary/20 pl-3 py-2 bg-muted/30 dark:bg-muted/20 rounded-r">
+                    <div className="text-xs uppercase tracking-wider font-semibold text-primary/80 dark:text-primary/70 mb-2 px-0.5">
+                        🤔 Agent Reasoning
+                    </div>
+                    <div className="space-y-1">
+                        {reasoning.map((update, index) => (
+                            <ReasoningStep
+                                key={`${update.type}-${index}-${update.content?.substring(0, 20)}`}
+                                type={update.type}
+                                content={update.content}
+                                stepNumber={update.stepNumber}
+                                toolName={update.toolName}
+                            />
+                        ))}
+                    </div>
                 </div>
             )}
             {isStreaming ? (
@@ -189,8 +281,10 @@ const LoadingIndicator: React.FC = () => {
 // Chat Input Component with pill design
 const ChatInput: React.FC<{
     onSend: (message: string) => void
+    onAbort?: () => void
     disabled: boolean
-}> = ({ onSend, disabled }) => {
+    isLoading: boolean
+}> = ({ onSend, onAbort, disabled, isLoading }) => {
     const [value, setValue] = useState('')
     const [isFocused, setIsFocused] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -232,7 +326,7 @@ const ChatInput: React.FC<{
             {/* Input Area */}
             <div className="w-full px-3 py-2">
                 <div className="w-full flex items-start gap-3">
-                    <div className="relative flex-1 overflow-hidden">
+                    <div className="relative flex-1 overflow-hidden break-words">
                         <textarea
                             ref={textareaRef}
                             value={value}
@@ -243,29 +337,49 @@ const ChatInput: React.FC<{
                             placeholder="Send a message..."
                             className="w-full resize-none outline-none bg-transparent 
                                      text-foreground placeholder:text-muted-foreground
-                                     min-h-[24px] max-h-[200px]"
+                                     min-h-[24px] max-h-[200px] break-words overflow-wrap-anywhere"
                             rows={1}
-                            style={{ lineHeight: '24px' }}
+                            style={{ 
+                                lineHeight: '24px',
+                                wordBreak: 'break-word',
+                                overflowWrap: 'break-word',
+                                wordWrap: 'break-word'
+                            }}
                         />
                     </div>
                 </div>
             </div>
 
-            {/* Send Button */}
+            {/* Send/Stop Button */}
             <div className="w-full flex items-center gap-1.5 px-1 mt-2 mb-1">
                 <div className="flex-1" />
-                <button
-                    onClick={handleSubmit}
-                    disabled={disabled || !value.trim()}
-                    className={cn(
-                        "size-9 rounded-full flex items-center justify-center",
-                        "transition-all duration-200",
-                        "bg-primary text-primary-foreground",
-                        "hover:opacity-80 disabled:opacity-50"
-                    )}
-                >
-                    <ArrowUp className="size-5" />
-                </button>
+                {isLoading && onAbort ? (
+                    <button
+                        onClick={onAbort}
+                        className={cn(
+                            "size-9 rounded-full flex items-center justify-center",
+                            "transition-all duration-200",
+                            "bg-red-500 text-white",
+                            "hover:bg-red-600 hover:opacity-90"
+                        )}
+                        title="Stop generation"
+                    >
+                        <Square className="size-4 fill-current" />
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleSubmit}
+                        disabled={disabled || !value.trim()}
+                        className={cn(
+                            "size-9 rounded-full flex items-center justify-center",
+                            "transition-all duration-200",
+                            "bg-primary text-primary-foreground",
+                            "hover:opacity-80 disabled:opacity-50"
+                        )}
+                    >
+                        <ArrowUp className="size-5" />
+                    </button>
+                )}
             </div>
         </div>
     )
@@ -305,7 +419,7 @@ const ConversationTurnComponent: React.FC<{
 
 // Main Chat Component
 export const Chat: React.FC = () => {
-    const { messages, isLoading, sendMessage, clearChat, reasoning, confirmationRequest, guidanceRequest, handleConfirmation, handleGuidanceResponse, actionPlan, currentStep } = useChat()
+    const { messages, isLoading, sendMessage, abortRequest, clearChat, reasoning, confirmationRequest, guidanceRequest, handleConfirmation, handleGuidanceResponse, actionPlan, currentStep, visualContext } = useChat()
     const scrollRef = useAutoScroll(messages)
 
     // Group messages into conversation turns
@@ -347,7 +461,11 @@ export const Chat: React.FC = () => {
                     )}
                 </div>
 
-                <div className="pb-4 relative max-w-3xl mx-auto px-4">
+                <div className="pb-4 relative max-w-3xl mx-auto px-4 break-words overflow-hidden">
+
+                    {visualContext && (
+                        <VisualContextPanel context={visualContext} />
+                    )}
 
                     {messages.length === 0 ? (
                         // Empty State
@@ -371,7 +489,7 @@ export const Chat: React.FC = () => {
                                         showLoadingAfterLastTurn &&
                                         index === conversationTurns.length - 1
                                     }
-                                    reasoning={index === conversationTurns.length - 1 ? reasoning : undefined}
+                                    reasoning={isLoading && index === conversationTurns.length - 1 ? reasoning : (index === conversationTurns.length - 1 && reasoning && reasoning.length > 0 ? reasoning : undefined)}
                                     actionPlan={index === conversationTurns.length - 1 ? actionPlan : undefined}
                                     currentStep={index === conversationTurns.length - 1 ? currentStep : undefined}
                                 />
@@ -386,7 +504,7 @@ export const Chat: React.FC = () => {
 
             {/* Input Area */}
             <div className="p-4">
-                <ChatInput onSend={sendMessage} disabled={isLoading} />
+                <ChatInput onSend={sendMessage} onAbort={abortRequest} disabled={isLoading} isLoading={isLoading} />
             </div>
 
             {/* Confirmation Dialog */}

@@ -1,6 +1,6 @@
 # Blueberry Browser
 
-> **⚠️ Disclaimer:** I'm not proud of this codebase! It was built in 3 hours. If you have some time left over in the challenge, feel free to refactor and clean things up!
+> **Blueberry Browser** is an Electron-based browser with integrated AI agent capabilities, customizable workspaces, and webview-based widgets. The browser features Chrome-like UI, AI-powered automation, and a flexible workspace system for organizing web content.
 
 https://github.com/user-attachments/assets/bbf939e2-d87c-4c77-ab7d-828259f6d28d
 

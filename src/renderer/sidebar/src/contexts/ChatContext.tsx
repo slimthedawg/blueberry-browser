@@ -187,14 +187,84 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Set up message listeners
     useEffect(() => {
+        // Track streaming message state
+        let currentStreamingMessageId: string | null = null
+        let accumulatedContent = ''
+
         // Listen for streaming response updates
         const handleChatResponse = (data: { messageId: string; content: string; isComplete: boolean }) => {
+            console.log(`[ChatContext] Received chat-response:`, {
+                messageId: data.messageId,
+                contentLength: data.content?.length,
+                isComplete: data.isComplete,
+                contentPreview: data.content?.substring(0, 50)
+            })
+
+            // Handle streaming content
+            if (data.content) {
+                // If this is a new message or same streaming message, accumulate content
+                if (currentStreamingMessageId === null || currentStreamingMessageId === data.messageId) {
+                    if (currentStreamingMessageId === null) {
+                        // New streaming message started
+                        currentStreamingMessageId = data.messageId
+                        accumulatedContent = data.content
+                    } else {
+                        // Continue accumulating (content is already the new delta in some cases)
+                        // The agent sends accumulated content, so use it directly if larger
+                        if (data.content.length > accumulatedContent.length) {
+                            accumulatedContent = data.content
+                        } else {
+                            accumulatedContent += data.content
+                        }
+                    }
+
+                    // Update or add the assistant message
+                    setMessages(prev => {
+                        const existingAssistantIdx = prev.findIndex(
+                            m => m.role === 'assistant' && m.id === `streaming-${data.messageId}`
+                        )
+
+                        if (existingAssistantIdx >= 0) {
+                            // Update existing streaming message
+                            const updated = [...prev]
+                            updated[existingAssistantIdx] = {
+                                ...updated[existingAssistantIdx],
+                                content: accumulatedContent,
+                                isStreaming: !data.isComplete
+                            }
+                            return updated
+                        } else {
+                            // Add new assistant message (streaming)
+                            return [...prev, {
+                                id: `streaming-${data.messageId}`,
+                                role: 'assistant' as const,
+                                content: accumulatedContent,
+                                timestamp: Date.now(),
+                                isStreaming: !data.isComplete
+                            }]
+                        }
+                    })
+                }
+            }
+
             if (data.isComplete) {
+                // Streaming complete - finalize the message
+                setMessages(prev => {
+                    return prev.map(m => {
+                        if (m.id === `streaming-${data.messageId}`) {
+                            return { ...m, isStreaming: false }
+                        }
+                        return m
+                    })
+                })
+                // Reset streaming state
+                currentStreamingMessageId = null
+                accumulatedContent = ''
                 setIsLoading(false)
             }
         }
 
-        // Listen for message updates from main process
+        // Listen for message updates from main process (for non-agent mode / history sync)
         const handleMessagesUpdated = (updatedMessages: any[]) => {
             // Convert CoreMessage format to our frontend Message format
             const convertedMessages = updatedMessages.map((msg: any, index: number) => ({
@@ -211,6 +281,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Listen for agent reasoning updates - render immediately
         const handleReasoningUpdate = (update: ReasoningUpdate) => {
+            console.log(`[ChatContext] Received reasoning update:`, {
+                type: update.type,
+                content: update.content?.substring(0, 50),
+                stepNumber: update.stepNumber
+            })
+            
+            // Only accept known reasoning types - filter out any garbage
+            const validTypes = ['planning', 'executing', 'completed', 'error', 'warning', 'info']
+            if (!validTypes.includes(update.type)) {
+                console.warn(`[ChatContext] Ignoring unknown reasoning type: ${update.type}`)
+                return
+            }
+            
             // Use functional update to ensure we get the latest state
             setReasoning((prev) => {
                 // Check if this is a duplicate (same content and type)

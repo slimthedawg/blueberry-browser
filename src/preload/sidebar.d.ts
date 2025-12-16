@@ -64,11 +64,13 @@ interface SidebarAPI {
   onAgentConfirmationRequest: (callback: (request: ConfirmationRequest) => void) => void;
   onAgentActionPlan: (callback: (plan: ActionPlan) => void) => void;
   onAgentCurrentStep: (callback: (step: number) => void) => void;
+  onAgentContextUpdate: (callback: (context: any) => void) => void;
   sendAgentConfirmationResponse: (data: { id: string; confirmed: boolean }) => void;
   removeAgentReasoningListener: () => void;
   removeAgentConfirmationListener: () => void;
   removeAgentActionPlanListener: () => void;
   removeAgentCurrentStepListener: () => void;
+  removeAgentContextListener: () => void;
   onAgentActionPlan: (callback: (plan: ActionPlan) => void) => void;
   onAgentCurrentStep: (callback: (step: number) => void) => void;
   removeAgentActionPlanListener: () => void;
@@ -78,6 +80,23 @@ interface SidebarAPI {
   onAgentGuidanceRequest: (callback: (request: any) => void) => void;
   sendAgentGuidanceResponse: (data: { id: string; selector?: string; elementInfo?: any; cancelled?: boolean }) => void;
   removeAgentGuidanceListener: () => void;
+
+  // Recording functionality
+  recordingStart: (name?: string) => Promise<{ success: boolean; id?: string; error?: string }>;
+  recordingStop: () => Promise<{ success: boolean; filepath?: string | null; error?: string }>;
+  recordingPause: () => Promise<{ success: boolean; error?: string }>;
+  recordingResume: () => Promise<{ success: boolean; error?: string }>;
+  recordingGetState: () => Promise<{ isRecording: boolean; isPaused: boolean; recordingId: string | null }>;
+  recordingGetList: () => Promise<Array<{ id: string; name: string; startTime: number; endTime: number; actionCount: number }>>;
+  recordingLoad: (id: string) => Promise<any>;
+  recordingDelete: (id: string) => Promise<boolean>;
+  recordingRename: (id: string, newName: string) => Promise<boolean>;
+  recordingGetDirectory: () => Promise<string>;
+  recordingOpenDirectory: () => Promise<{ success: boolean; error?: string }>;
+
+  // Sidebar resize
+  resizeSidebar: (width: number) => Promise<boolean>;
+  getSidebarWidth: () => Promise<number>;
 }
 
 interface ActionPlan {

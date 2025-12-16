@@ -8,6 +8,7 @@ export class SideBar {
   private baseWindow: BaseWindow;
   private llmClient: LLMClient;
   private isVisible: boolean = true;
+  private width: number = 400; // Default width, can be resized
 
   constructor(baseWindow: BaseWindow) {
     this.baseWindow = baseWindow;
@@ -51,9 +52,9 @@ export class SideBar {
 
     const bounds = this.baseWindow.getBounds();
     this.webContentsView.setBounds({
-      x: bounds.width - 400, // 400px width sidebar on the right
+      x: bounds.width - this.width, // Dynamic width sidebar on the right
       y: 88, // Start below the topbar
-      width: 400,
+      width: this.width,
       height: bounds.height - 88, // Subtract topbar height
     });
   }
@@ -105,5 +106,22 @@ export class SideBar {
 
   getIsVisible(): boolean {
     return this.isVisible;
+  }
+
+  getWidth(): number {
+    return this.width;
+  }
+
+  setWidth(newWidth: number): void {
+    // Constrain width between 300px and 800px
+    const constrainedWidth = Math.max(300, Math.min(800, newWidth));
+    
+    // Only update if width actually changed
+    if (this.width === constrainedWidth) {
+      return;
+    }
+    
+    this.width = constrainedWidth;
+    this.setupBounds();
   }
 }

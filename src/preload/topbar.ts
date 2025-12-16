@@ -31,6 +31,18 @@ const topBarAPI = {
   // Sidebar
   toggleSidebar: () =>
     electronAPI.ipcRenderer.invoke("toggle-sidebar"),
+
+  // Bring topbar to front (for popups)
+  bringToFront: () =>
+    electronAPI.ipcRenderer.invoke("topbar-bring-to-front"),
+  
+  // Restore topbar bounds
+  restoreBounds: () =>
+    electronAPI.ipcRenderer.invoke("topbar-restore-bounds"),
+  
+  // Show item in folder (file system)
+  showItemInFolder: (path: string) =>
+    electronAPI.ipcRenderer.invoke("show-item-in-folder", path),
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to
